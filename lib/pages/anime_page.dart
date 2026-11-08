@@ -18,7 +18,6 @@ class AnimePage extends StatefulWidget {
 class _AnimePageState extends State<AnimePage> {
   final _service = JmService.instance;
   final _items = <Map<String, dynamic>>[];
-  final _searchCtrl = TextEditingController();
   final _scroll = ScrollController();
 
   bool _loading = true;
@@ -27,7 +26,6 @@ class _AnimePageState extends State<AnimePage> {
   int _total = 0;
   String? _error;
   String _type = 'hanime';
-  String _query = '';
 
   /// 官方 video_type 取值
   static const _types = <(String, String)>[
@@ -46,7 +44,6 @@ class _AnimePageState extends State<AnimePage> {
   void dispose() {
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
-    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -71,7 +68,7 @@ class _AnimePageState extends State<AnimePage> {
     try {
       final r = await _service.fetchVideosPaged(
         page: _page,
-        query: _query.isEmpty ? null : _query,
+        query: null,
         videoType: _type,
       );
       if (!mounted) return;
@@ -105,62 +102,34 @@ class _AnimePageState extends State<AnimePage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(L.t('anime')),
+        // 搜索入口已移除：全站统一用发现页的搜索（切到「视频」板块即可）。
+        // 板块内再放搜索框只会让用户分不清该用哪个。
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(96),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                child: TextField(
-                  controller: _searchCtrl,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (v) {
-                    setState(() => _query = v.trim());
-                    _load(reset: true);
-                  },
-                  decoration: InputDecoration(
-                    hintText: L.t('searchAnimeHint'),
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    suffixIcon: _searchCtrl.text.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.clear, size: 18),
-                            onPressed: () {
-                              _searchCtrl.clear();
-                              setState(() => _query = '');
-                              _load(reset: true);
-                            },
-                          ),
+          preferredSize: const Size.fromHeight(42),
+          child: SizedBox(
+            height: 42,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+              children: _types.map((t) {
+                final active = _type == t.$1;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8, bottom: 2),
+                  child: ChoiceChip(
+                    label: Text(
+                      L.t(t.$2),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    selected: active,
+                    onSelected: (_) {
+                      if (active) return;
+                      setState(() => _type = t.$1);
+                      _load(reset: true);
+                    },
                   ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
-              SizedBox(
-                height: 38,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  children: _types.map((t) {
-                    final active = _type == t.$1;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8, bottom: 4),
-                      child: ChoiceChip(
-                        label: Text(
-                          L.t(t.$2),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        selected: active,
-                        onSelected: (_) {
-                          if (active) return;
-                          setState(() => _type = t.$1);
-                          _load(reset: true);
-                        },
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
+                );
+              }).toList(),
+            ),
           ),
         ),
         actions: [

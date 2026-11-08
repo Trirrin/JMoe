@@ -66,14 +66,8 @@ class _StoragePageState extends State<StoragePage> {
 
     return Scaffold(
       appBar: AppBar(
+        // 刷新按钮已移除：本页支持下拉刷新，再放一个按钮是重复入口
         title: Text(L.t('storageManage')),
-        actions: [
-          IconButton(
-            tooltip: L.t('refresh'),
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _loading ? null : _refresh,
-          ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

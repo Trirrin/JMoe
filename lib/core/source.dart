@@ -57,6 +57,9 @@ class DetailInfo {
   final int likes;
   final int comments;
 
+  /// 当前用户是否已点赞该作品（服务端返回）
+  final bool liked;
+
   /// e-hentai 等源的附加信息行（分类/上传者/发布时间…）
   final List<MapEntry<String, String>> meta;
 
@@ -71,6 +74,7 @@ class DetailInfo {
     this.likes = 0,
     this.comments = 0,
     this.meta = const [],
+    this.liked = false,
   });
 }
 
@@ -150,10 +154,18 @@ abstract class ComicSource {
 
   Future<HomeFeed> home({int page = 1});
 
+  /// 搜索。
+  ///
+  /// [order]      排序：`''` 最新 / `mv` 最多观看 / `mp` 最多图片 / `tf` 最多爱心
+  /// [searchType] 检索方式：`site` / `work` / `author` / `tag` / `character`
+  /// [year]/[month] 年份 / 月份筛选（仅 JM 源支持，EH 忽略）
   Future<PageResult<Comic>> search(
     String query, {
     int page = 1,
-    String order = 'mr',
+    String order = '',
+    String searchType = 'site',
+    String? year,
+    String? month,
   });
 
   Future<List<BrowseCategory>> categories();

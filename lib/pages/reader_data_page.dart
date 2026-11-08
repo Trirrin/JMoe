@@ -2,17 +2,31 @@ import 'package:flutter/material.dart';
 
 import '../core/app_state.dart';
 import '../core/l10n.dart';
-import '../core/reader_store.dart';
 import '../core/reading_stats.dart';
 import '../core/storage_manager.dart';
 import '../core/downloader.dart';
+import '../widgets/reading_calendar.dart';
 
-/// 阅读数据页：书签 / 批注 / 阅读时长统计。
+/// 阅读数据页：只保留**阅读时长统计**。
 ///
-/// 数据来自 ReaderStore（已持久化）与 ReaderSettings（累计阅读秒数）。
+/// 书签 / 批注板块已按需求移除（漫画阅读场景用不到划线批注，
+/// 书签也只是多一层噪音）。数据本身仍留在 ReaderStore 里，
+/// 万一以后要恢复展示不需要迁移数据。
 class ReaderDataPage extends StatefulWidget {
-  /// 书籍 id；为 null 时聚合展示所有书籍的数据。
+  /// 书籍 id（保留参数位以兼容调用方；当前不影响展示）。
   final String? bookId;
+
+  /// 供外部预热：切到统计页前先把体积数据算好，避免首次进入时
+  /// 「先空后满」的跳变与卡顿。
+  static final GlobalKey<State<ReaderDataPage>> statsKey =
+      GlobalKey<State<ReaderDataPage>>();
+
+  static void precacheNow() {
+    final st = statsKey.currentState;
+    if (st == null) return;
+    // ignore: avoid_dynamic_calls
+    (st as dynamic).precacheStorage();
+  }
 
   const ReaderDataPage({super.key, this.bookId});
 
@@ -20,13 +34,21 @@ class ReaderDataPage extends StatefulWidget {
   State<ReaderDataPage> createState() => _ReaderDataPageState();
 }
 
-class _ReaderDataPageState extends State<ReaderDataPage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 3, vsync: this);
-
+class _ReaderDataPageState extends State<ReaderDataPage> {
   /// 存储占用（分类）
   List<StorageSlice> _storageSlices = const [];
   int _storageTotal = 0;
+
+  /// 上次可见性，用于「切回本页时刷新数据」
+  bool _lastVisible = true;
+
+  /// 存储明细是否已就绪。
+  ///
+  /// 之前 `_storageSlices` 一开始是空数组，异步返回后才插入到列表里，
+  /// 于是「切到统计页」时会先看到短内容、几十毫秒后又被撑长 ——
+  /// 视觉上就是内容「跳一下」。现在未就绪时不渲染该区块（保留固定占位），
+  /// 就绪后一次性画出来，不再跳。
+  bool _storageReady = false;
 
   @override
   void initState() {
@@ -41,9 +63,15 @@ class _ReaderDataPageState extends State<ReaderDataPage>
       setState(() {
         _storageSlices = s;
         _storageTotal = s.fold<int>(0, (a, b) => a + b.bytes);
+        _storageReady = true;
       });
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _storageReady = true);
+    }
   }
+
+  /// 供外部预热调用（见 [ReaderDataPage.precacheNow]）。
+  Future<void> precacheStorage() => _loadStorage();
 
   String _fmtBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -55,176 +83,36 @@ class _ReaderDataPageState extends State<ReaderDataPage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Offstage 会切换 TickerMode；从隐藏变为可见时刷新一次
+    final visible = TickerMode.of(context);
+    if (visible && !_lastVisible) {
+      // 让出一帧再刷新，避免 build 期间 setState
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
+    _lastVisible = visible;
+  }
+
+  @override
   void dispose() {
-    _tab.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bookId = widget.bookId;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(L.t('readerData')),
-        bottom: TabBar(
-          controller: _tab,
-          tabs: [
-            Tab(text: L.t('bookmarks')),
-            Tab(text: L.t('annotations')),
-            Tab(text: L.t('readingStats')),
-          ],
-        ),
+      // 刷新按钮已移除：本页为统计展示，进入/切回即刷新，手上不需要按钮。
+      appBar: AppBar(title: Text(L.t('readingStats'))),
+      body: RefreshIndicator(
+        onRefresh: () async => setState(() {}),
+        edgeOffset: MediaQuery.of(context).padding.top,
+        child: _buildStats(theme),
       ),
-      body: TabBarView(
-              controller: _tab,
-              children: [
-                bookId == null
-                    ? _noBookHint(theme, L.t('noBookmarks'))
-                    : _buildBookmarks(theme, bookId),
-                bookId == null
-                    ? _noBookHint(theme, L.t('noAnnotations'))
-                    : _buildAnnotations(theme, bookId),
-                _buildStats(theme),
-              ],
-            ),
-    );
-  }
-
-  /// 无关联书籍时的占位提示
-  Widget _noBookHint(ThemeData theme, String text) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 13,
-            height: 1.6,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBookmarks(ThemeData theme, String bookId) {
-    final list = ReaderStore.instance.bookmarks(bookId);
-    if (list.isEmpty) {
-      return Center(
-        child: Text(
-          L.t('noBookmarks'),
-          style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-        ),
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
-      itemCount: list.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, i) {
-        final b = list[i];
-        return Card(
-          elevation: 0,
-          color: theme.colorScheme.surfaceContainerLow,
-          child: ListTile(
-            leading: const Icon(Icons.bookmark_outline),
-            title: Text(
-              b.chapterTitle,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(
-              b.excerpt,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete_outline, size: 18),
-              onPressed: () async {
-                await ReaderStore.instance.removeBookmark(bookId, b);
-                if (mounted) setState(() {});
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildAnnotations(ThemeData theme, String bookId) {
-    final list = ReaderStore.instance.annotations(bookId);
-    if (list.isEmpty) {
-      return Center(
-        child: Text(
-          L.t('noAnnotations'),
-          style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-        ),
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
-      itemCount: list.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, i) {
-        final a = list[i];
-        return Card(
-          elevation: 0,
-          color: theme.colorScheme.surfaceContainerLow,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        a.chapterTitle,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, size: 18),
-                      onPressed: () async {
-                        await ReaderStore.instance
-                            .removeAnnotation(bookId, a.id);
-                        if (mounted) setState(() {});
-                      },
-                    ),
-                  ],
-                ),
-                Text(
-                  a.text,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12.5, height: 1.6),
-                ),
-                if (a.note.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer
-                          .withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      a.note,
-                      style: const TextStyle(fontSize: 12, height: 1.5),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -233,6 +121,11 @@ class _ReaderDataPageState extends State<ReaderDataPage>
     final st = ReadingStats.instance;
 
     return ListView(
+      key: const PageStorageKey('stats_scroll'),
+      // 可下拉刷新：内容不满一屏时也能拉
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
         // ---- 总览 ----
@@ -310,6 +203,15 @@ class _ReaderDataPageState extends State<ReaderDataPage>
           unit: L.t('unitVideo'),
         ),
 
+        // ---- 阅读日历 ----
+        //
+        // 三个板块合并展示：每天读了多少时间一目了然。
+        // 圆形格子 + 颜色深浅表示活跃度，与签到日历风格一致。
+        const SizedBox(height: 20),
+        _sectionTitle(theme, L.t('readingCalendar')),
+        const SizedBox(height: 8),
+        ReadingCalendar(daily: st.mergedDaily),
+
         // ---- 缓存 ----
         const SizedBox(height: 20),
         _sectionTitle(theme, L.t('cacheStats')),
@@ -378,7 +280,7 @@ class _ReaderDataPageState extends State<ReaderDataPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 下载任务
+              // 下载与离线资源
               Row(
                 children: [
                   Icon(Icons.download_rounded,
@@ -386,27 +288,55 @@ class _ReaderDataPageState extends State<ReaderDataPage>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      L.t('downloadTasks'),
+                      L.t('offlineResourceStats'),
                       style: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                  Text(
-                    L.tp('downloadCounts', {
-                      'active': ChapterDownloader.activeCount,
-                      'done': ChapterDownloader.allTasks
-                          .where((t) => t.done)
-                          .length,
-                    }),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 6),
+              // 离线资源明细：下载章节 / 导入包 / 小说缓存 / 视频缓存。
+              // 用户要求「统计也需要计算离线资源」——
+              // 之前这一块只统计在线阅读，离线看的内容完全不计入。
+              Builder(
+                builder: (context) {
+                  final tasks = ChapterDownloader.allTasks;
+                  final doneChapters =
+                      tasks.where((t) => t.done).length;
+                  final donePages = tasks
+                      .where((t) => t.done)
+                      .fold<int>(0, (a, t) => a + t.total);
+                  final bytes = ChapterDownloader.totalDownloadBytes();
+                  return Text(
+                    L.tp('offlineResourceDetail', {
+                      'c': '$doneChapters',
+                      'p': '$donePages',
+                      'mb': (bytes / 1024 / 1024).toStringAsFixed(1),
+                    }),
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  );
+                },
+              ),
               const SizedBox(height: 12),
-              // 存储占用明细
-              ..._storageSlices.map((sl) {
+              // 存储占用明细：未采集完时显示固定高度的占位，
+              // 就绪后一次性替换 —— 避免「先短后长」导致的跳变。
+              if (!_storageReady)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 10),
+                  child: Center(
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else
+                ..._storageSlices.map((sl) {
                 final pct =
                     _storageTotal <= 0 ? 0.0 : sl.bytes / _storageTotal;
                 return Padding(
@@ -447,6 +377,7 @@ class _ReaderDataPageState extends State<ReaderDataPage>
                 );
               }),
               const SizedBox(height: 4),
+              if (_storageReady)
               Row(
                 children: [
                   Expanded(

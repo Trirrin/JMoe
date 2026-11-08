@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 路径声明。
+
+  Android 7+ 禁止把 file:// URI 通过 Intent 外泄（FileUriExposedException），
+  分享 / 打开目录都必须走 content:// （由 FileProvider 提供临时授权）。
+  这里把外部存储的应用私有目录与缓存目录都纳入可共享范围。
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- /storage/emulated/0/Android/data/<pkg>/files -->
+    <external-files-path name="ext_files" path="." />
+    <!-- /storage/emulated/0/Android/data/<pkg>/cache -->
+    <external-cache-path name="ext_cache" path="." />
+    <!-- 应用内部 files / cache -->
+    <files-path name="files" path="." />
+    <cache-path name="cache" path="." />
+    <!-- 下载产物所在的外部存储根（JMoe 目录） -->
+    <external-path name="external" path="." />
+</paths>

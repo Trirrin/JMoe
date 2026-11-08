@@ -5,7 +5,9 @@ import '../core/app_state.dart';
 import '../core/jm_protocol.dart';
 import '../core/jm_service.dart';
 import '../core/l10n.dart';
+import 'change_password_page.dart';
 import 'login_page.dart';
+import 'my_comments_page.dart';
 import 'profile_edit_page.dart';
 
 /// 账号管理页：已登录显示账号信息 + 资产 + 签到 + 套餐（只读）；
@@ -84,9 +86,11 @@ class _AccountPageState extends State<AccountPage> {
     ]);
     if (!mounted) return;
     setState(() {
+      // 顺序很重要：必须先写 _daily，再解析（早期写反了，
+      // 导致 _dailyStatus 永远基于上一轮的 null 计算）
+      _daily = results.length > 1 ? results[1] as Map<String, dynamic>? : null;
       _dailyStatus = JmService.parseDaily(_daily);
       _plans = results[0] as List<Map<String, dynamic>>;
-      _daily = results.length > 1 ? results[1] as Map<String, dynamic>? : null;
       _assetsLoading = false;
     });
   }
@@ -428,39 +432,7 @@ class _AccountPageState extends State<AccountPage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: _dailyStatus!.days.map((d) {
-                          final isToday = d.date ==
-                              DateTime.now().day.toString().padLeft(2, '0');
-                          return Container(
-                            width: 30,
-                            height: 30,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: d.signed
-                                  ? scheme.primary
-                                  : scheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(6),
-                              border: isToday
-                                  ? Border.all(
-                                      color: scheme.primary, width: 1.5)
-                                  : null,
-                            ),
-                            child: Text(
-                              '${int.tryParse(d.date) ?? d.date}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: d.signed
-                                    ? scheme.onPrimary
-                                    : scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
+                      _buildCalendar(theme),
                     ],
                   ],
                 ),
@@ -499,17 +471,17 @@ class _AccountPageState extends State<AccountPage> {
               color: scheme.surfaceContainerLow,
               child: Column(
                 children: [
+                  // 「云端收藏 / 历史」入口已移除：书架页已有同功能，
+                  // 账号页重复摆一处只是噪音。改为「我的评论」。
                   ListTile(
-                    leading: const Icon(Icons.favorite_border),
-                    title: Text(L.t('cloudFavorites')),
+                    leading: const Icon(Icons.forum_outlined),
+                    title: Text(L.t('myComments')),
                     trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () => Navigator.of(context).pop(),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.history),
-                    title: Text(L.t('history')),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () => Navigator.of(context).pop(),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const MyCommentsPage(),
+                      ),
+                    ),
                   ),
                   ListTile(
                     leading: const Icon(Icons.edit_outlined),
@@ -523,6 +495,18 @@ class _AccountPageState extends State<AccountPage> {
                       );
                       if (changed == true && mounted) setState(() {});
                     },
+                  ),
+                  // 修改密码与「编辑资料」同级：都是账号级操作，
+                  // 不该埋在资料表单最底部
+                  ListTile(
+                    leading: const Icon(Icons.lock_outline_rounded),
+                    title: Text(L.t('changePassword')),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const ChangePasswordPage(),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -539,6 +523,96 @@ class _AccountPageState extends State<AccountPage> {
               label: Text(L.t('logout')),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 本月签到日历：按星期对齐的 7 列日历格（**周日在前**）。
+  ///
+  /// 原来的实现是「一串 30 个方块直接 Wrap」，既看不出星期，也容易
+  /// 因为解析漏项而只剩几格。这里改成标准日历：空白占位对齐 1 号所在星期，
+  /// 每格显示日号，已签到高亮、今日描边。
+  ///
+  /// 列顺序按「日 一 二 三 四 五 六」：服务端 `bonus` 标记落在每周的
+  /// 周日 + 周一，周日排在首列时奖励节点正好首尾相邻，更符合直觉。
+  Widget _buildCalendar(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    final days = _dailyStatus?.days ?? const <DailyDay>[];
+    if (days.isEmpty) return const SizedBox.shrink();
+
+    final now = DateTime.now();
+    // DateTime.weekday：1=周一 … 7=周日。
+    // 换成「周日在前」的列序号：周日 → 0，周一 → 1 … 周六 → 6
+    int colOf(DateTime d) => d.weekday % 7;
+    final firstCol = colOf(DateTime(now.year, now.month, 1));
+    final todayDay = now.day;
+
+    const cols = 7;
+    final cells = <Widget>[
+      // 星期表头（周日起）
+      for (final w in const ['日', '一', '二', '三', '四', '五', '六'])
+        SizedBox(
+          height: 20,
+          child: Center(
+            child: Text(
+              w,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
+            ),
+          ),
+        ),
+      // 1 号之前的空位
+      for (var i = 0; i < firstCol; i++) const SizedBox(height: 34),
+      // 每一天
+      for (final d in days)
+        _calendarCell(theme, d, int.tryParse(d.date) ?? 0, todayDay),
+      // 补足最后一行，保证网格对齐
+      for (var i = 0; i < (cols - (firstCol + days.length) % cols) % cols; i++)
+        const SizedBox(height: 34),
+    ];
+
+    return GridView.count(
+      crossAxisCount: cols,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 4,
+      crossAxisSpacing: 4,
+      childAspectRatio: 1,
+      children: cells,
+    );
+  }
+
+  Widget _calendarCell(ThemeData theme, DailyDay d, int day, int today) {
+    final scheme = theme.colorScheme;
+    final isToday = day == today;
+    // 注意：服务端的 `bonus` 标记落在每月 01/07/08/14/15/21/22/28/29
+    // （每周的周日 + 周一），本质是「3 天 / 7 天奖励节点」的周期刻度。
+    // 早期版本在这里画了个小圆点，结果整列周日全是点，看着像 bug ——
+    // 而且没有图例，用户无法理解。奖励规则标题里已经写明，这里不再画点。
+    //
+    // 形状用**正圆**（不是圆角方块）：日历日期用圆形是通行做法，
+    // 圆角矩形在小尺寸下会显得像按钮而不是日期。
+    return Container(
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: d.signed ? scheme.primary : scheme.surfaceContainerHighest,
+        border: isToday
+            ? Border.all(color: scheme.primary, width: 1.5)
+            : null,
+      ),
+      child: Text(
+        day <= 0 ? '' : '$day',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: isToday || d.signed
+              ? FontWeight.w700
+              : FontWeight.w500,
+          color: d.signed ? scheme.onPrimary : scheme.onSurfaceVariant,
         ),
       ),
     );
@@ -594,12 +668,24 @@ class _AccountPageState extends State<AccountPage> {
   Widget _planTile(ThemeData theme, Map<String, dynamic> p) {
     final scheme = theme.colorScheme;
     final name = '${p['name'] ?? ''}';
-    final price = '${p['price'] ?? ''}';
+    // 官方字段语义（payment 接口实测）：
+    //   months      套餐时长（1/3/6/12 个月）
+    //   price       每月单价（如 6 个月 = 22.33）
+    //   total       该套餐总价（如 6 个月 = 134）—— 这才是用户要付的钱
+    //   original    原价（无折扣时等于 total）
+    //   days / exp  有效天数 / 赠品经验
+    // 早期把 price 当总价显示成「¥22.33」，看起来像每月价格，
+    // 与「3/6/12 个月」的量级完全对不上。这里以 total 为准。
+    final months = int.tryParse('${p['months'] ?? ''}') ?? 0;
+    final perMonth = '${p['price'] ?? ''}';
+    final total = '${p['total'] ?? p['original'] ?? ''}';
     final days = '${p['days'] ?? ''}';
     final exp = '${p['exp'] ?? ''}';
     final features =
         (p['features'] as List?)?.whereType<Object>().map((e) => '$e').toList() ??
             const <String>[];
+    // 不显示「最热」角标、也不做选中态高亮 —— 纯只读列表，
+    // 高亮反而让人以为「这个已被选中/已购买」。
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
@@ -610,21 +696,57 @@ class _AccountPageState extends State<AccountPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(
-                    name,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      // 换算成「每月多少钱」，方便横向比较不同时长
+                      if (months > 1 && perMonth.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            L.tp('planPerMonth', {'p': perMonth}),
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                Text(
-                  '¥$price',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: scheme.primary,
-                  ),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '¥$total',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: scheme.primary,
+                      ),
+                    ),
+                    if (months > 0)
+                      Text(
+                        L.tp('planMonthsN', {'n': '$months'}),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),

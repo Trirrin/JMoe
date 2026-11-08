@@ -57,6 +57,8 @@ ThemeData buildAppTheme(Color seed, Brightness brightness, {bool oled = false}) 
         TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
       },
     ),
+    // 注：Flutter 没有全局「页面过渡时长」开关，时长由各 PageRoute 自己定。
+    // 需要放慢的页面（详情页）在自己的 Route 里设置 duration。
     appBarTheme: AppBarTheme(
       centerTitle: false,
       elevation: 0,

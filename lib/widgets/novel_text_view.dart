@@ -87,9 +87,8 @@ class NovelTextView extends StatelessWidget {
         }
         return false;
       },
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapUp: (_) => onTap(),
+      child: _TapDetector(
+        onTap: onTap,
         child: SingleChildScrollView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(
@@ -128,29 +127,44 @@ class NovelTextView extends StatelessWidget {
       child: _text(context, seg, highlightRanges),
     );
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragEnd: (d) {
-        final v = d.primaryVelocity ?? 0;
-        if (v < -180) {
-          onTurn(1);
-        } else if (v > 180) {
+    // 分页模式的手势：
+    // - 横向滑动 → 翻页
+    // - 点左侧 1/4 → 上一页
+    // - 点右侧 1/4 → 下一页
+    // - 点中间 → 呼出菜单
+    return _TapDetector(
+      onTapAt: (pos, width) {
+        if (pos < width * 0.25) {
           onTurn(-1);
+        } else if (pos > width * 0.75) {
+          onTurn(1);
+        } else {
+          onTap();
         }
       },
-      onTapUp: (_) => onTap(),
-      child: body,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragEnd: (d) {
+          final v = d.primaryVelocity ?? 0;
+          if (v < -180) {
+            onTurn(1);
+          } else if (v > 180) {
+            onTurn(-1);
+          }
+        },
+        child: body,
+      ),
     );
   }
 
   /// 统一的内容内边距：顶部含状态栏，底部含进度栏高度。
   EdgeInsets _contentPadding(BuildContext context) {
-    final topInset = MediaQuery.of(context).padding.top;
+    // 状态栏由外层 SafeArea 处理，这里只留正常边距
     return EdgeInsets.fromLTRB(
       settings.marginH,
-      settings.marginV + topInset,
+      settings.marginV,
       settings.marginH,
-      settings.marginV + (settings.showProgress ? 26 : 0),
+      settings.marginV + (settings.showProgress ? 34 : 0),
     );
   }
 
@@ -173,3 +187,62 @@ class NovelTextView extends StatelessWidget {
   }
 }
 
+
+/// 只把「真正的点击」识别为 tap，并上报点击位置。
+///
+/// 直接用 Listener.onPointerUp 会在滑动结束时也触发，
+/// 导致一滑动就弹出菜单。这里记录按下与抬起的位移，
+/// 超过阈值视为拖动，不触发点击。
+class _TapDetector extends StatefulWidget {
+  const _TapDetector({
+    this.onTap,
+    this.onTapAt,
+    required this.child,
+  });
+
+  /// 简单点击回调（不需要位置时用）
+  final VoidCallback? onTap;
+
+  /// 带位置的点击回调：pos = 局部 x 坐标，width = 控件宽度
+  final void Function(double pos, double width)? onTapAt;
+
+  final Widget child;
+
+  @override
+  State<_TapDetector> createState() => _TapDetectorState();
+}
+
+class _TapDetectorState extends State<_TapDetector> {
+  Offset? _downAt;
+  static const double _slop = 12; // 允许的手指抖动
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (e) => _downAt = e.position,
+          onPointerUp: (e) {
+            final d = _downAt;
+            _downAt = null;
+            if (d == null) return;
+            if ((e.position - d).distance > _slop) return; // 拖动，不算点击
+
+            final at = widget.onTapAt;
+            if (at != null) {
+              // 用全局坐标减去控件左上角，得到局部 x
+              final box = context.findRenderObject() as RenderBox?;
+              final local = box?.globalToLocal(e.position).dx ?? 0;
+              at(local, constraints.maxWidth);
+            } else {
+              widget.onTap?.call();
+            }
+          },
+          onPointerCancel: (_) => _downAt = null,
+          child: widget.child,
+        );
+      },
+    );
+  }
+}

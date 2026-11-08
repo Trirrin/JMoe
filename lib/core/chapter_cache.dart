@@ -5,10 +5,12 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import 'image_cache.dart';
+import 'cache_manager.dart';
 import 'models.dart';
 import 'image_scrambler.dart';
 import 'jm_protocol.dart';
 import 'source.dart';
+import 'temp_store.dart';
 
 /// 整章缓存的全局任务管理器。
 ///
@@ -17,8 +19,16 @@ import 'source.dart';
 ///  * **后台持续**：离开阅读页后任务继续跑，进度保留
 ///  * **统一进度**：`done/total` + 百分比，供蒙版与顶栏共用
 ///  * **可取消/可重试**
+///  * **大章节不在内存里堆**：页数 ≥ [TempStore.spillPageCount] 的章节
+///    一律把原图落到 [TempStore] 的临时目录，阅读时按需读盘解码，
+///    内存只保留眼前几页（详见 [TempStore] 的删除策略）。
 class ChapterCacheManager {
-  ChapterCacheManager._();
+  ChapterCacheManager._() {
+    // 告诉 TempStore「哪些目录正被后台任务写入」，避免清扫时误删。
+    TempStore.instance.isBusy = (dir) => _tasks.values.any(
+          (t) => t.tempDir == dir && t.isActive,
+        );
+  }
   static final ChapterCacheManager instance = ChapterCacheManager._();
 
   /// 任务表：key = source.id:chapterId
@@ -65,6 +75,13 @@ class ChapterCacheManager {
       comic: comic,
       bundle: bundle,
     );
+    // 大章节：不在内存里堆整章解码图，改为落临时目录按需读。
+    // 阈值见 TempStore.spillPageCount（页数）——单页特别大的情况在写入时
+    // 也会被 TempStore.maxSingleImageBytes 兜住。
+    task.spill = bundle.length >= TempStore.spillPageCount;
+    // 目录要异步取（path_provider），先挂一个 ready future，
+    // 阅读页会等它就绪再建页面，避免先按「走网络」渲染一遍。
+    if (task.spill) task.tempDirReady = _prepareTemp(task);
     if (skipIfCached) {
       // 已完整缓存：直接标记完成，不重复下载
       task.status = CacheStatus.completed;
@@ -103,12 +120,28 @@ class ChapterCacheManager {
     } catch (_) {}
   }
 
+  /// 取（或创建）某章的临时目录，填进 task.tempDir。
+  Future<void> _prepareTemp(ChapterCacheTask task) async {
+    try {
+      task.tempDir = await TempStore.instance.dirFor(
+        task.source.id,
+        task.bundle.chapterId,
+      );
+    } catch (_) {
+      task.spill = false; // 取目录失败 → 退回内存模式
+    }
+    _notify();
+  }
+
   Future<void> _run(ChapterCacheTask task, int concurrency) async {
     task.status = CacheStatus.running;
     _notify();
 
     final bundle = task.bundle;
     final sid = bundle.scrambleId;
+
+    // 等临时目录就绪（大章节才有）
+    if (task.tempDirReady != null) await task.tempDirReady;
 
     // 以 startPage 为中心向两侧扩散的取号序列：
     // start, start+1, start-1, start+2, start-2, ...
@@ -158,6 +191,46 @@ class ChapterCacheManager {
                   referer:
                       task.source.id == 'ehentai' ? ref.resolveUrl : null,
                 );
+            // ---- 大章节：原图直接落临时目录，不解码、不驻留内存 ----
+            final tempDir = task.tempDir;
+            if (task.spill && tempDir != null) {
+              if (!TempStore.instance.has(tempDir, ref.index)) {
+                // 注意：这里刻意不走 load() —— 那会把整章字节塞进内存 LRU，
+                // 大章节几百 MB 直接 OOM。只读盘、没盘才下载且不缓存。
+                var sb = await ImageCacheManager.instance.readDiskOnly(url);
+                if (sb == null) {
+                  sb = await fetcher(url);
+                }
+                if (sb != null) {
+                  var sdata = sb;
+                  if (sid != null &&
+                      ImageScrambler.needScramble(
+                        bundle.scrambleAid,
+                        sid,
+                        url,
+                      )) {
+                    // 必须还原后再落盘：落的是可直接显示的图
+                    final pk = ImageScrambler.pageKeyFromUrl(url, ref.index);
+                    final seg =
+                        ImageScrambler.segments(bundle.scrambleAid, pk);
+                    sdata = await unscramble(sb, seg);
+                  }
+                  await TempStore.instance.put(
+                    tempDir,
+                    ref.index,
+                    sdata,
+                    sourceId: task.source.id,
+                    chapterId: bundle.chapterId,
+                  );
+                }
+              }
+              task.doneFlags[i] = TempStore.instance.has(tempDir, ref.index);
+              task.done++;
+              task.readyCount = task.doneFlags.where((e) => e).length;
+              _notify();
+              continue;
+            }
+
             final bytes = task.persistToDisk
                 ? await ImageCacheManager.instance.loadForDownload(
                     url,
@@ -179,18 +252,33 @@ class ChapterCacheManager {
                 final seg = ImageScrambler.segments(bundle.scrambleAid, pk);
                 data = await unscramble(bytes, seg);
               }
-              final img = await ImageCacheManager.decode(data);
-              if (img != null) ImageCacheManager.instance.putUi(url, img);
-              task.doneFlags[i] = true;
+              // 单张特别大（解码后可能几十 MB）→ 单独落临时目录，不驻留内存
+              if (data.length > TempStore.maxSingleImageBytes) {
+                task.tempDir ??= await TempStore.instance
+                    .dirFor(task.source.id, bundle.chapterId);
+                await TempStore.instance.put(
+                  task.tempDir!,
+                  ref.index,
+                  data,
+                  sourceId: task.source.id,
+                  chapterId: bundle.chapterId,
+                );
+                task.doneFlags[i] = true;
+              } else {
+                final img = await ImageCacheManager.decode(data);
+                if (img != null) ImageCacheManager.instance.putUi(url, img);
+                task.doneFlags[i] = true;
+              }
             }
           }
         } catch (_) {}
         task.done++;
         task.readyCount = task.doneFlags.where((e) => e).length;
-
       // 若本次是「边看边缓存」（未写盘），整章就绪后异步补写一次盘，
       // 这样读完的章节下次仍可离线观看，而不会像纯内存缓存那样丢失。
+      // 落临时目录的章节跳过：数据已经在临时目录里了，再写一份纯属浪费。
       if (!task.persistToDisk &&
+          !task.spill &&
           task.readyCount >= task.total &&
           task.total > 0) {
         _persistAfterComplete(task);
@@ -207,6 +295,26 @@ class ChapterCacheManager {
       task.status = task.cancelledFlag
           ? CacheStatus.cancelled
           : CacheStatus.completed;
+      // 登记到「已缓存章节」索引：缓存管理页据此展示与清理，
+      // 阅读页据此判断「进来就免加载」。
+      // 同时记录该章图片 URL，删章时才能精确清理、不误伤别的章节。
+      if (task.status == CacheStatus.completed && task.readyCount > 0) {
+        final urls = <String>[];
+        for (final p in bundle.pages) {
+          final u = p.directUrl ?? p.resolveUrl;
+          if (u != null && u.isNotEmpty) urls.add(u);
+        }
+        unawaited(CacheManager.instance.markChapter(
+          sourceId: task.source.id,
+          comicId: task.comic.id,
+          chapterId: bundle.chapterId,
+          comicName: task.comic.name,
+          chapterName: bundle.chapterName,
+          cover: task.source.coverOf(task.comic),
+          total: task.total,
+          imageUrls: urls,
+        ));
+      }
     } catch (_) {
       task.status = CacheStatus.failed;
     }
@@ -295,6 +403,17 @@ class ChapterCacheTask {
 
   /// 是否写盘：true = 用户主动下载；false = 边看边缓存（仅内存）。
   bool persistToDisk = false;
+
+  /// 大章节的临时目录（页数多 / 单页特别大时才创建）。
+  ///
+  /// 非空时整章原图落在 [TempStore]，内存里不留解码图。
+  String? tempDir;
+
+  /// 本章是否走「落临时目录」模式。
+  bool spill = false;
+
+  /// 临时目录准备完成的信号（大章节才有；阅读页据此决定等多久）。
+  Future<void>? tempDirReady;
 
   /// 优先加载的起始页（0-based）。
   int startPage = 0;

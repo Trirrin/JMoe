@@ -95,12 +95,18 @@ class JmSource implements ComicSource {
   Future<PageResult<Comic>> search(
     String query, {
     int page = 1,
-    String order = 'mr',
+    String order = '',
+    String searchType = 'site',
+    String? year,
+    String? month,
   }) async {
     final (list, total) = await _service.search(
       query,
       page: page,
       order: order,
+      searchType: searchType,
+      year: year,
+      month: month,
     );
     return PageResult(
       items: list,
@@ -187,6 +193,7 @@ class JmSource implements ComicSource {
       views: d.views,
       likes: d.likes,
       comments: d.commentTotal,
+      liked: d.liked,
     );
   }
 

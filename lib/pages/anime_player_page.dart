@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 import '../core/l10n.dart';
 import '../core/jm_service.dart';
 import '../core/reader_native.dart';
+import '../core/app_state.dart';
 import '../core/reading_stats.dart';
 import '../core/video_cache.dart';
 
@@ -165,7 +166,17 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     } catch (_) {}
   }
 
+  /// 正在切换选集（加载/缓存中）。
+  ///
+  /// 切换过程包含「取播放地址 → 下载缓存 → 初始化播放器」几步，
+  /// 期间若再点别的选集，会把 `_currentId` 改成新值但旧流程仍在跑，
+  /// 最后两边都去初始化 `_controller` → 相互打断、界面错乱。
+  /// 因此切换期间**忽略新的切换请求**。
+  bool _switching = false;
+
   Future<void> _load({String? id, String? title}) async {
+    if (_switching) return; // 动画/加载中，不接受新的切换
+    _switching = true;
     if (id != null) _currentId = id;
     if (title != null) _currentTitle = title;
     setState(() {
@@ -189,6 +200,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         _loading = false;
         _error = L.t('noPlayUrl');
       });
+      _switching = false;
       return;
     }
     if (title == null && video is Map) {
@@ -228,7 +240,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         },
         isCancelled: () => _cancelCache,
       );
-      if (!mounted) return;
+      if (!mounted) {
+        _switching = false;
+        return;
+      }
       if (path != null) {
         playSrc = path;
         setState(() {
@@ -272,6 +287,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         _loading = false;
         _error = L.tp('playFailed', {'e': e});
       });
+    } finally {
+      // 无论成功失败都解除「切换中」；失败的集数可以再点一次重试
+      _switching = false;
     }
   }
 
@@ -283,9 +301,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     if (v.isPlaying) {
       final cur = v.position.inMilliseconds;
       final delta = cur - _lastStatPosition;
-      // 只累计正常前进（忽略拖动跳转造成的跳变）
-      if (delta > 0 && delta < 5000) {
-        ReadingStats.instance.addSeconds(StatType.video, delta ~/ 1000);
+      // 只排除「明显拖动」造成的跳变（>15s），
+      // 缓冲卡顿后的正常增量要照常累计，否则时长永远为 0。
+      if (delta > 0 && delta < 15000) {
+        final sec = delta ~/ 1000;
+        if (sec > 0) {
+          ReadingStats.instance.addSeconds(StatType.video, sec);
+        }
       }
       _lastStatPosition = cur;
     } else {
@@ -335,6 +357,24 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         await sp.remove(_progressKey); // 看完清掉
       } else if (ms > 1000) {
         await sp.setInt(_progressKey, ms);
+      }
+      // 同步写阅读历史（kind = video）：用「秒」当页单位，
+      // 这样历史里也能算出「看了多少 / 共多少」的占比。
+      if (dur > 0) {
+        AppState.instance.recordHistory(
+          ReadHistoryEntry(
+            comicId: _currentId,
+            chapterId: _currentId,
+            comicName: _currentTitle,
+            chapterName: _currentTitle,
+            cover: null,
+            source: 'jm',
+            kind: 'video',
+            page: (ms ~/ 1000).clamp(0, dur ~/ 1000),
+            totalPage: dur ~/ 1000,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          ),
+        );
       }
     } catch (_) {}
   }
@@ -517,114 +557,140 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
   }
 
 
-  /// 播放前的缓存蒙层：进度条 + xx/xx + 「边下边播」。
+  /// 播放前的缓存蒙层：进度条 + 百分比 + 「边下边播」。
   ///
-  /// 布局说明：标题栏已独立成行、信息面板在其下方，
-  /// 蒙层只覆盖视频区域，因此不需要额外顶部留白。
+  /// 布局要点（修过两个问题）：
+  ///  * **标题与退出按钮同一行**：以前返回按钮用 `Positioned` 贴在左上，
+  ///    标题在 `Center` 列里，两者基线永远对不齐。现在统一放进顶部 Row。
+  ///  * **按钮不贴底边**：蒙层高度取决于视频区域，内容居中时按钮可能
+  ///    紧贴下沿。改成「顶部标题栏 + 中间信息 + 底部安全间距」，
+  ///    并给整块加 `SafeArea`，任何屏幕比例下都不贴边。
   Widget _buildCacheOverlay() {
     // 用分片完成比例作为进度（比字节估算稳定）
     final pct = _cacheTotal <= 0 ? 0.0 : _cacheDone / _cacheTotal;
     return Container(
       color: Colors.black.withValues(alpha: 0.55),
-      child: Stack(
-        children: [
-          // 左上角返回：缓存过程中也能退出
-          Positioned(
-            left: 4,
-            top: 4,
-            child: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded,
-                  color: Colors.white, size: 22),
-              tooltip: L.t('back'),
-              onPressed: () {
-                _cancelCache = true;
-                Navigator.of(context).maybePop();
-              },
-            ),
-          ),
-          Center(
-            child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+      child: SafeArea(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            // 缓存时也显示当前视频标题（与控制层同一行标题）
-            if (_currentTitle.isNotEmpty) ...[
-              Text(
-                _currentTitle,
-                maxLines: 2,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  height: 1.35,
-                ),
-              ),
-              const SizedBox(height: 14),
-            ],
-            const Icon(Icons.download_rounded, color: Colors.white70, size: 34),
-            const SizedBox(height: 14),
-            Text(
-              L.t('preparingVideo'),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: _cacheTotal <= 0 ? null : pct,
-                minHeight: 5,
-                backgroundColor: Colors.white24,
+            // ---- 顶部：返回 + 标题（同一行，垂直居中）----
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 16, 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                    tooltip: L.t('back'),
+                    onPressed: () {
+                      _cancelCache = true;
+                      Navigator.of(context).maybePop();
+                    },
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      _currentTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // 只显示已下载量：HLS 没有准确总大小，
-                // 之前用「均值×片数」估算会一直跳动。
-                Text(
-                  _fmtBytes(_cacheDone),
-                  style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+            // ---- 中间：进度信息 ----
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.download_rounded,
+                        color: Colors.white70,
+                        size: 34,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        L.t('preparingVideo'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: _cacheTotal <= 0 ? null : pct,
+                          minHeight: 5,
+                          backgroundColor: Colors.white24,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // 只显示已下载量：HLS 没有准确总大小，
+                          // 用「均值×片数」估算会一直跳动。
+                          Text(
+                            _fmtBytes(_cacheDone),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${(pct * 100).toStringAsFixed(0)}%',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  '${(pct * 100).toStringAsFixed(0)}%',
-                  style: const TextStyle(color: Colors.white70, fontSize: 11.5),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            OutlinedButton(
-              onPressed: () {
-                // 放弃缓存，立刻用网络流播放
-                _cancelCache = true;
-                setState(() {
-                  _caching = false;
-                        });
-              },
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white38),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               ),
-              child: Text(
-                L.t('playWhileCaching'),
-                style: const TextStyle(fontSize: 12.5),
+            ),
+            // ---- 底部：边下边播（与下边缘留出间距，不再贴边）----
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+              child: OutlinedButton(
+                onPressed: () {
+                  // 放弃缓存，立刻用网络流播放
+                  _cancelCache = true;
+                  setState(() => _caching = false);
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white38),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 10,
+                  ),
+                  minimumSize: const Size(double.infinity, 40),
+                ),
+                child: Text(
+                  L.t('playWhileCaching'),
+                  style: const TextStyle(fontSize: 12.5),
+                ),
               ),
             ),
           ],
         ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -647,22 +713,24 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       onLongPressStart: (d) {
         if (_locked || c == null) return;
         _longPressing = true;
-        // 以当前倍速为起点（保留 1 位小数）
-        _rateAtLongPress = double.parse(_rate.toStringAsFixed(1));
+        // 长按**固定以 2 倍速为起点**（与行业通行做法一致：
+        // 长按就是「加速看」，不该跟随用户平时设的倍速）。
+        // 之后左右滑动再以 2x 为基准增减。
+        _rateAtLongPress = 2.0;
         c.setPlaybackSpeed(_rateAtLongPress);
-        _toast('${_rateAtLongPress.toStringAsFixed(1)}x');
+        _toast('2.0x');
       },
       onLongPressMoveUpdate: (d) {
         if (!_longPressing || c == null) return;
-        // 按**滑动比例**而非绝对像素换算：滑过屏幕宽度的 100%
-        // 对应 0.5x~3.0x 全量程。这样竖屏/横屏手感一致，
-        // 竖屏也能从 0.5x 一路滑到 3.0x（之前的 400px 定长
-        // 在竖屏下最多只能到 1.9x）。
+        // 按**滑动比例**换算，滑过屏幕宽度 100% 覆盖 0.5x~3.0x 全量程。
+        // 基准点 = 2.0x（长按起点）：右滑加速、左滑减速。
         final w = context.size?.width ?? 400;
         final frac = (d.offsetFromOrigin.dx / w).clamp(-1.0, 1.0);
-        // frac: -1 → 0.5x，0 → 长按起点，+1 → 3.0x
-        final span = 3.0 - 0.5;
-        final raw = _rateAtLongPress + frac * (span / 2);
+        // frac: -1 → 0.5x，0 → 2.0x（起点），+1 → 3.0x
+        // 右滑空间只有 1.0x，左滑有 1.5x，所以两侧斜率分开算。
+        final raw = frac >= 0
+            ? 2.0 + frac * (3.0 - 2.0)
+            : 2.0 + frac * (2.0 - 0.5);
         final stepped =
             ((raw * 10).round() / 10).clamp(0.5, 3.0).toDouble();
         c.setPlaybackSpeed(stepped);
@@ -939,6 +1007,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                   _fmt(v.position),
                   style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
+                // 时间与进度条之间留出间距：之前两者紧贴，
+                // 进度条起止点看起来像压在数字上
+                const SizedBox(width: 10),
                 Expanded(
                   child: _BufferedProgressBar(
                     progress: progress.clamp(0.0, 1.0),
@@ -955,6 +1026,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                     },
                   ),
                 ),
+                const SizedBox(width: 10),
                 Text(
                   _fmt(v.duration),
                   style: const TextStyle(color: Colors.white, fontSize: 12),

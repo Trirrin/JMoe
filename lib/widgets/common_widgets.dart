@@ -34,11 +34,20 @@ class CoverImage extends StatelessWidget {
 
 /// 3:4 封面卡片。
 class ComicCard extends StatelessWidget {
+  /// 封面下方文字区的固定高度（标题 + 作者 + 类别行 + 间距）。
+  ///
+  /// 网格用它计算 childAspectRatio，**必须与实际渲染高度一致**，
+  /// 否则类别标签的圆角会被卡片底边裁掉。
+  static const double textBlockHeight = 82;
+
   final String title;
   final String? subtitle;
   final String? cover;
   final String? badge;
   final VoidCallback? onTap;
+
+  /// 长按（书架用于进入多选）
+  final VoidCallback? onLongPress;
   final double? progress;
   final int? memCacheWidth;
 
@@ -54,6 +63,18 @@ class ComicCard extends StatelessWidget {
   /// 封面右下角文字角标（无热度数据时显示更新时间）。
   final String? coverMeta;
 
+  /// 是否本地收藏（封面右上角显示「本地」角标）
+  final bool localTag;
+
+  /// 是否云端收藏（封面右上角显示云朵角标）
+  final bool cloudTag;
+
+  /// 封面右下角的**类型**角标：漫画 / 小说 / 视频。
+  ///
+  /// 与左上角的源标识（JM/EH）、右上角的收藏标识分处不同角落，
+  /// 三者互不遮挡。
+  final String? kindTag;
+
   const ComicCard({
     super.key,
     required this.title,
@@ -61,23 +82,67 @@ class ComicCard extends StatelessWidget {
     this.cover,
     this.badge,
     this.onTap,
+    this.onLongPress,
     this.progress,
     this.memCacheWidth,
     this.heat,
     this.category,
     this.heroTag,
     this.coverMeta,
+    this.localTag = false,
+    this.cloudTag = false,
+    this.kindTag,
   });
 
+
+  /// 封面角标的统一样式（左上角用）。
+  ///
+  /// 高度固定 17、圆角 6、字号 10 —— 与右上角的云端/本地角标**完全一致**，
+  /// 左右两个标签看起来才整齐。
+  Widget _cornerTag(String text, {bool bold = false}) {
+    return Container(
+      height: 17,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Center(
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _maybeHero(Widget child) {
     if (heroTag == null || heroTag!.isEmpty) return child;
     return Hero(
       tag: heroTag!,
-      // 只用位移/缩放过渡，透明度保持不变（不做淡出淡入）
+      // 飞行层**独立构造**，不引用 from/to 任何一方的 widget。
+      //
+      // 之前用 `return child`（源卡片实例）：飞行途中若源卡片被重建、
+      // 滚出 cacheExtent、或图片字节被内存 LRU 淘汰，飞行层就跟着失效 ——
+      // 表现正是「Hero 动画有几率直接消失，变成硬切」。
+      // 独立构造只依赖 cover URL，任何时刻都能画出来。
       flightShuttleBuilder: (context, animation, direction, fromCtx, toCtx) {
-        return child;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(AppStyle.cardRadius),
+          child: CoverImage(url: cover),
+        );
       },
+      // 源卡片在飞行期间留同尺寸占位，避免整行重新布局（卡片「跳一下」）
+      placeholderBuilder: (context, size, widget) => SizedBox(
+        width: size.width,
+        height: size.height,
+      ),
       // 直线平移：不用默认的 MaterialRectArcTween（弧形路径）。
       // 用普通 RectTween 做矩形线性插值，配合线性时间曲线，
       // 视觉上就是从卡片封面沿直线滑到详情页封面。
@@ -92,16 +157,27 @@ class ComicCard extends StatelessWidget {
     final scheme = theme.colorScheme;
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(AppStyle.cardRadius),
       child: Column(
+        // 关键：必须 min，否则 Column 会尝试填满父级高度，
+        // 在 Wrap / Grid 的受限约束下把文字区压缩，导致类别标签被裁。
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 用 AspectRatio 固定封面比例（3:4）。
-          // 之前用 Expanded，在 shrinkWrap:true 的网格里会被父级无限高度拉伸，
-          // 造成分区标题与卡片之间出现大片空白。
-          AspectRatio(
-            aspectRatio: 3 / 4,
-            child: _maybeHero(
+          // 封面用 LayoutBuilder + 显式高度代替 AspectRatio。
+          //
+          // 原因：AspectRatio 在不同约束模式下行为不同 ——
+          // 松约束下按宽度算高，紧约束下可能反向压缩宽度，
+          // 导致卡片总高不确定，文字区（类别标签行）被挤出卡片而被裁。
+          // 显式给定高度后，卡片尺寸完全确定，任何约束模式下都一致。
+          LayoutBuilder(
+            builder: (context, box) {
+              final w = box.maxWidth.isFinite ? box.maxWidth : 120.0;
+              return SizedBox(
+                width: w,
+                height: w * 4 / 3,
+                child: _maybeHero(
               Stack(
               children: [
                 Positioned.fill(
@@ -111,29 +187,74 @@ class ComicCard extends StatelessWidget {
                     memCacheWidth: memCacheWidth,
                   ),
                 ),
-                if (badge != null && badge!.isNotEmpty)
+                // 收藏来源角标：右上角，**云端优先**
+                //  - 已同步云端 → 云朵图标（蓝）
+                //  - 仅本地未同步 → 「本地」文字胶囊（主色）
+                // 同一条目若同时在云端和本地（正常情况），显示云端；
+                // 只有「本地新增、还没上云」才显示「本地」。
+                if (cloudTag)
                   Positioned(
-                    left: 6,
+                    right: 6,
                     top: 6,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 3,
-                      ),
+                      // 与左上角类型角标**同高同圆角**（高度 17、圆角 6），
+                      // 之前云朵角标没有固定高度（只有 icon+padding），
+                      // 视觉上比左侧的类型标签矮一截，看起来不整齐。
+                      height: 17,
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.62),
+                        color: const Color(0xFF2F7DE1).withValues(alpha: 0.92),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: Text(
-                        badge!,
-                        style: const TextStyle(
+                      child: const Center(
+                        child: Icon(
+                          Icons.cloud_done_rounded,
+                          size: 11,
                           color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  )
+                else if (localTag)
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Container(
+                      height: 17,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      decoration: BoxDecoration(
+                        color: scheme.primary,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Center(
+                        child: Text(
+                          L.t('localTag'),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onPrimary,
+                          ),
                         ),
                       ),
                     ),
                   ),
+                // 左上角：**类型角标**（漫画 / 小说 / 视频）。
+                // 用户说的「类别」就是这个三大类，不是 JM 的同人/韩漫分类。
+                // 放在左上最显眼，让用户一眼分清作品是什么形态。
+                if (kindTag != null && kindTag!.isNotEmpty)
+                  Positioned(
+                    left: 6,
+                    top: 6,
+                    child: _cornerTag(kindTag!, bold: true),
+                  )
+                // 没有类型角标时才退到源标识（JM）
+                else if (badge != null && badge!.isNotEmpty)
+                  Positioned(
+                    left: 6,
+                    top: 6,
+                    child: _cornerTag(badge!),
+                  ),
+                // 右下角：热度（类型角标已移到左上，不再重复显示）
                 if (heat != null && heat!.isNotEmpty)
                   Positioned(
                     right: 5,
@@ -188,76 +309,52 @@ class ComicCard extends StatelessWidget {
                 ],
               ),
             ),
+              );
+            },
           ),
           const SizedBox(height: 6),
-          // 标题固定单行：网格高度是固定比例（0.52），
-          // 两行标题会把下方的作者/类别挤出卡片，造成视觉重叠。
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              height: 1.25,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          if (subtitle != null && subtitle!.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(
-              subtitle!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-          // 类别 + 日期同一行（日期不再显示在封面角标）
-          if ((category != null && category!.isNotEmpty) ||
-              (coverMeta != null && coverMeta!.isNotEmpty)) ...[
-            const SizedBox(height: 3),
-            Row(
+          // 文字区：自然高度（不固定、不用 Spacer），
+          // 由网格行高留足余量来保证不被裁切。
+          Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                if (category != null && category!.isNotEmpty)
-                  Flexible(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 1.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: scheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text(
-                        category!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onPrimaryContainer,
-                        ),
-                      ),
-                    ),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    height: 1.25,
+                    fontWeight: FontWeight.w500,
                   ),
-                if (category != null &&
-                    category!.isNotEmpty &&
-                    coverMeta != null &&
-                    coverMeta!.isNotEmpty)
-                  const SizedBox(width: 4),
-                if (coverMeta != null && coverMeta!.isNotEmpty)
+                ),
+                if (subtitle != null && subtitle!.isNotEmpty) ...[
+                  const SizedBox(height: 2),
                   Text(
-                    coverMeta!,
+                    subtitle!,
                     maxLines: 1,
-                    style: TextStyle(
-                      fontSize: 9.5,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
+                ],
+                // 仅显示日期（类别标签已按需求移除）
+                if (coverMeta != null && coverMeta!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    coverMeta!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      height: 1.0,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ],
             ),
-          ],
         ],
       ),
     );
@@ -392,8 +489,12 @@ class EmptyView extends StatelessWidget {
   }
 }
 
-/// 骨架占位。
-class ShimmerBox extends StatelessWidget {
+/// 骨架占位：带横向流光（shimmer）的灰块。
+///
+/// 静态灰块在长列表里几乎看不出「还在加载」，加一条从左掠到右的高光
+/// 让加载状态可感知；用 [AnimatedBuilder] 驱动，整棵骨架共用一个控制器
+/// 时开销可忽略。
+class ShimmerBox extends StatefulWidget {
   final double? width;
   final double? height;
   final double radius;
@@ -406,14 +507,47 @@ class ShimmerBox extends StatelessWidget {
   });
 
   @override
+  State<ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<ShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(radius),
-      ),
+    final scheme = Theme.of(context).colorScheme;
+    final base = scheme.surfaceContainerHighest;
+    final shine = scheme.surfaceContainerLow;
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, _) {
+        final t = _ctrl.value; // 0..1
+        // 高光从 -1 掠到 2：起止都在可视区外，循环时无跳变
+        final x = t * 3 - 1;
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.radius),
+            gradient: LinearGradient(
+              begin: Alignment(x - 1, 0),
+              end: Alignment(x + 1, 0),
+              colors: [base, shine, base],
+              stops: const [0.0, 0.5, 1.0],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -428,6 +562,13 @@ class ComicGrid extends StatelessWidget {
   final EdgeInsets padding;
   final int? loadingCount;
 
+  /// Hero tag 命名空间前缀。
+  ///
+  /// 不同列表页必须用不同前缀。否则当页面栈里同时存在多个列表页时
+  /// （如 发现页 → 详情 → 搜索 → 详情），同名 tag 会互相抢占，
+  /// 导致返回时封面飞向错误位置。
+  final String heroPrefix;
+
   const ComicGrid({
     super.key,
     required this.items,
@@ -436,6 +577,7 @@ class ComicGrid extends StatelessWidget {
     this.crossAxisCount,
     this.padding = const EdgeInsets.all(AppStyle.pagePadding),
     this.loadingCount,
+    this.heroPrefix = 'cover',
   });
 
   @override
@@ -481,10 +623,14 @@ class ComicGrid extends StatelessWidget {
             _ => 400,
           },
           heat: c.heat == null ? null : _formatCount(c.heat!),
+          // 本地收藏角标（仅「未同步到云端」的条目）
+          localTag: AppState.instance.localFavorites.any(
+            (f) => '${f['id']}' == c.id && f['pendingSync'] == true,
+          ),
           category: c.category,
           // 日期始终显示在类别旁
           coverMeta: _formatDate(c.updateAt),
-          heroTag: 'cover_${c.source}_${c.id}',
+          heroTag: '${heroPrefix}_${c.source}_${c.id}',
           onTap: () => onTap(c),
         );
       },
@@ -499,13 +645,12 @@ String _formatCount(int v) {
   return '$v';
 }
 
-/// 更新时间 → MM-dd
+/// 更新时间 → YYYY-MM-DD（统一显示完整年月日）
 String _formatDate(int? ts) {
   if (ts == null || ts <= 0) return '';
   final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-  final now = DateTime.now();
-  if (now.difference(d).inDays == 0) {
-    return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-  }
-  return '${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  final y = d.year;
+  final m = d.month.toString().padLeft(2, '0');
+  final day = d.day.toString().padLeft(2, '0');
+  return '$y-$m-$day';
 }

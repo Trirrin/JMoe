@@ -37,6 +37,11 @@ android {
     }
 }
 
+dependencies {
+    // FileProvider（分享 / 打开目录需要 content:// URI）
+    implementation("androidx.core:core:1.13.1")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
@@ -49,8 +54,26 @@ flutter {
 
 // 若本机没有完整 NDK，则指向包含 llvm-strip 的精简 NDK 目录，
 // 使 AGP 能完成 strip 步骤（本项目无原生代码，只需 strip 工具）。
-val slimNdk = file("F:/_sdk/ndk")
-if (slimNdk.resolve("bin/llvm-strip.exe").exists() && !file("G:/Android/ndk/28.2.13676358").exists()) {
+//
+// 注意：**不能硬编码开发机的绝对路径**，否则 CI（GitHub Actions 等）
+// 上没有该路径会直接构建失败。这里改为「多个候选路径 + 存在才用」，
+// 都找不到就跳过 —— 本工程没有原生代码，跳过 strip 也能正常出包。
+val slimNdkCandidates = listOfNotNull(
+    System.getenv("JMoe_SLIM_NDK"),
+    System.getenv("ANDROID_NDK_HOME"),
+    System.getenv("ANDROID_NDK_ROOT"),
+    // 开发机约定路径（存在才用，不存在不影响 CI）
+    "F:/_sdk/ndk",
+).map { file(it) }
+
+val installedNdk = System.getenv("ANDROID_NDK_HOME")
+    ?: System.getenv("ANDROID_NDK_ROOT")
+
+val slimNdk = slimNdkCandidates.firstOrNull {
+    it.resolve("bin/llvm-strip.exe").exists() ||
+        it.resolve("toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe").exists()
+}
+if (slimNdk != null && installedNdk == null) {
     android.ndkPath = slimNdk.path
 }
 

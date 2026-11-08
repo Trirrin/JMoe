@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
+import 'app_log.dart';
 import 'app_state.dart';
 import 'cache_manager.dart';
 import 'jm_service.dart';
@@ -39,6 +42,9 @@ class SyncService {
     }
     state.value = SyncState.running;
     try {
+      // 0) 先把上次失败/待取消的收藏同步掉
+      //    （放在最前：保证云端状态先收敛，后面的对账才准）
+      await flushUnfavoriteQueue();
       // 云端分页拉取（最多取前 10 页，避免过大）
       final cloud = <Comic>[];
       var page = 1;
@@ -103,11 +109,53 @@ class SyncService {
         updated: updated,
         localOnly: localOnly,
       );
-    } catch (e) {
+    } catch (e, st) {
       state.value = SyncState.failed;
       lastMessage = '$e';
+      // 失败必须留痕：之前只存了字符串、什么都不打，
+      // 用户反馈「同步失败但完全不知道原因」。
+      unawaited(AppLog.instance.error('SYNC', e, st));
+      print('[JMOE] syncFavorites FAILED: $e');
       return SyncResult(error: '$e');
     }
+  }
+
+  /// 处理「待取消收藏」队列：逐条去云端确认并取消。
+  ///
+  /// 为什么单独做：收藏的取消是**切换语义**，失败后无法靠简单重发补救
+  /// （重发可能反而又收藏回来）。所以这里用 [JmService.setFavorite]
+  /// ——它先读状态、只在确实不一致时切一次、再回读校验，是幂等的。
+  ///
+  /// 处理策略：
+  ///  * 成功 → 出队
+  ///  * 鉴权失败 → 停止（等用户重新登录，队列保留）
+  ///  * 其它失败 → 保留在队列，下次再试
+  Future<({int ok, int fail})> flushUnfavoriteQueue() async {
+    final queue = AppState.instance.pendingUnfavorite;
+    if (queue.isEmpty) return (ok: 0, fail: 0);
+    if (!AppState.instance.loggedIn) return (ok: 0, fail: 0);
+
+    var ok = 0;
+    var fail = 0;
+    for (final item in queue) {
+      final id = '${item['id'] ?? ''}';
+      if (id.isEmpty) continue;
+      final r = await _service.setFavorite(id, target: false);
+      if (r.ok) {
+        await AppState.instance.dequeueUnfavorite(id);
+        ok++;
+      } else {
+        fail++;
+        unawaited(AppLog.instance.log(
+          'SYNC',
+          'unfavorite flush failed id=$id err=${r.error}',
+        ));
+        // token 失效时不必继续试后续条目
+        if (_service.lastFavoritesAuthFailed) break;
+      }
+    }
+    lastMessage = 'unfav ok=$ok fail=$fail';
+    return (ok: ok, fail: fail);
   }
 
   /// 缓存索引与本地书架对账：清理磁盘上已不存在的章节索引。

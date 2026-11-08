@@ -1,3 +1,4 @@
+import 'app_state.dart';
 import 'ehentai_service.dart';
 import 'models.dart';
 import 'source.dart';
@@ -33,28 +34,47 @@ class EhSource implements ComicSource {
 
   @override
   Future<HomeFeed> home({int page = 1}) async {
-    // 首页与两个热门分类并发抓取
+    // 首页与两个热门分类并发抓取。
+    //
+    // 逐个宽容：任何一个失败都不该让整页白掉 —— 只要还有一路成功
+    // 就照常展示；全部失败才抛异常（由首页显示「加载失败 + 重试」）。
     final urls = [
       (_service.popularUrl(page: 1), L.t('latestUpload')),
       (_service.categoryUrl('doujinshi', page: 1), L.t('doujinshi')),
       (_service.categoryUrl('manga', page: 1), L.t('manga')),
     ];
-    final pages = await Future.wait(urls.map((u) => _service.fetchListing(u.$1)));
+    final pages = await Future.wait(
+      urls.map((u) async {
+        try {
+          return await _service.fetchListing(u.$1);
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+    if (pages.every((p) => p == null)) {
+      throw Exception(
+        AppState.instance.offlineMode
+            ? L.t('offline')
+            : (_service.lastError ?? L.t('networkError')),
+      );
+    }
+    final first = pages[0] ?? const EHPage(items: [], nextUrl: null, total: 0);
 
-    final hero = pages[0].items.take(8).map(_toComic).toList();
+    final hero = first.items.take(8).map(_toComic).toList();
     final sections = <HomeSection>[
       for (var i = 1; i < urls.length; i++)
-        if (pages[i].items.isNotEmpty)
+        if (pages[i]?.items.isNotEmpty == true)
           HomeSection(
             title: urls[i].$2,
-            items: pages[i].items.map(_toComic).toList(),
+            items: pages[i]!.items.map(_toComic).toList(),
             moreKey: 'cat:${urls[i].$1}',
           ),
-      if (pages[0].items.isNotEmpty)
+      if (first.items.isNotEmpty)
         HomeSection(
           title: L.t('latestUpload'),
-          items: pages[0].items.map(_toComic).toList(),
-          moreKey: 'next:${pages[0].nextUrl ?? ''}',
+          items: first.items.map(_toComic).toList(),
+          moreKey: 'next:${first.nextUrl ?? ''}',
         ),
     ];
     return HomeFeed(hero: hero, sections: sections);
@@ -64,7 +84,10 @@ class EhSource implements ComicSource {
   Future<PageResult<Comic>> search(
     String query, {
     int page = 1,
-    String order = 'mr',
+    String order = '',
+    String searchType = 'site',
+    String? year,
+    String? month,
   }) async {
     final p = await _service.fetchListing(_service.searchUrl(query, page: page));
     return PageResult(

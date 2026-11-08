@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
 
 import '../core/app_theme.dart';
 import '../core/jm_service.dart';
 import '../widgets/common_widgets.dart';
+import 'anime_player_page.dart';
 import '../core/l10n.dart';
 
 /// 视频列表。
@@ -79,11 +79,26 @@ class _VideosPageState extends State<VideosPage> {
                     itemBuilder: (context, i) {
                       final v = _items[i];
                       return InkWell(
+                        // 统一用完整的播放器（AnimePlayerPage）：
+                        // 之前这里用的是 VideoPlayerPage —— 一个只有
+                        // 「播放/暂停/±10s」的简化实现，手势、倍速、全屏、
+                        // 断点续播、预缓存全都没有。同一份视频点进来
+                        // 功能却不一样，用户自然会觉得「割裂」。
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => VideoPlayerPage(
+                            builder: (_) => AnimePlayerPage(
                               id: '${v['id']}',
                               title: '${v['title'] ?? ''}',
+                              videoType: '${v['video_type'] ?? 'hanime'}',
+                              playlist: _items
+                                  .map(
+                                    (e) => {
+                                      'id': '${e['id']}',
+                                      'title': '${e['title'] ?? ''}',
+                                    },
+                                  )
+                                  .toList(),
+                              playlistIndex: i,
                             ),
                           ),
                         ),
@@ -116,146 +131,6 @@ class _VideosPageState extends State<VideosPage> {
                     },
                   ),
                 ),
-    );
-  }
-}
-
-/// 视频播放页。
-class VideoPlayerPage extends StatefulWidget {
-  final String id;
-  final String title;
-  const VideoPlayerPage({super.key, required this.id, required this.title});
-
-  @override
-  State<VideoPlayerPage> createState() => _VideoPlayerPageState();
-}
-
-class _VideoPlayerPageState extends State<VideoPlayerPage> {
-  VideoPlayerController? _controller;
-  bool _loading = true;
-  String? _error;
-  String? _src;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final info = await JmService.instance.fetchVideoInfo(widget.id);
-    if (!mounted) return;
-    final video = info?['video'];
-    if (video is Map) {
-      _src = '${video['video_src'] ?? ''}';
-    }
-    if (_src == null || _src!.isEmpty) {
-      setState(() {
-        _loading = false;
-        _error = L.t('noPlayUrl');
-      });
-      return;
-    }
-    final c = VideoPlayerController.networkUrl(Uri.parse(_src!));
-    _controller = c;
-    try {
-      await c.initialize();
-      await c.play();
-      if (!mounted) return;
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = L.tp('playFailedE', {'e': '$e'});
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(widget.title, maxLines: 1),
-      ),
-      body: Center(
-        child: _loading
-            ? const CircularProgressIndicator()
-            : _error != null
-                ? Text(_error!, style: const TextStyle(color: Colors.white70))
-                : _controller == null
-                    ?  Text(
-                        L.t('noVideoSource'),
-                        style: TextStyle(color: Colors.white70),
-                      )
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          AspectRatio(
-                            aspectRatio: _controller!.value.aspectRatio == 0
-                                ? 16 / 9
-                                : _controller!.value.aspectRatio,
-                            child: VideoPlayer(_controller!),
-                          ),
-                          const SizedBox(height: 12),
-                          VideoProgressIndicator(
-                            _controller!,
-                            allowScrubbing: true,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.replay_10,
-                                  color: Colors.white,
-                                ),
-                                onPressed: () => _controller!.seekTo(
-                                  _controller!.value.position -
-                                      const Duration(seconds: 10),
-                                ),
-                              ),
-                              IconButton(
-                                iconSize: 42,
-                                icon: Icon(
-                                  _controller!.value.isPlaying
-                                      ? Icons.pause_circle_filled
-                                      : Icons.play_circle_filled,
-                                  color: Colors.white,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _controller!.value.isPlaying
-                                        ? _controller!.pause()
-                                        : _controller!.play();
-                                  });
-                                },
-                              ),
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.forward_10,
-                                  color: Colors.white,
-                                ),
-                                onPressed: () => _controller!.seekTo(
-                                  _controller!.value.position +
-                                      const Duration(seconds: 10),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-      ),
     );
   }
 }

@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 
 import '../core/app_state.dart';
 import '../core/app_theme.dart';
+import '../widgets/detail_route.dart';
 import '../widgets/app_icons.dart';
 import '../core/models.dart';
-import '../core/eh_source.dart';
 import '../core/jm_source.dart';
 import '../core/source.dart';
 import '../widgets/common_widgets.dart';
@@ -121,46 +121,55 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
     if (!mounted) return;
     final next = SourceRegistry.current;
     if (next.id == _source.id) return;
+    // 切到已有缓存的源 → 立刻显示缓存，不闪骨架屏；后台再静默刷新。
+    // 切到没缓存的源 → 才显示骨架屏。
     final cached = _cache[next.id];
-    final complete = _cacheComplete.contains(next.id);
+    final hasCache = cached != null && cached.sections.isNotEmpty;
     setState(() {
       _source = next;
       _error = null;
-      if (cached != null) {
-        // 命中缓存：立即显示（不闪骨架屏）
-        _feed = cached;
-        _loading = false;
-        _deferredLoading = !complete;
-      } else {
-        _feed = null;
-        _loading = true;
-        _deferredLoading = false;
-      }
+      _feed = hasCache ? cached : null;
+      _loading = !hasCache;
+      _deferredLoading = hasCache && !_cacheComplete.contains(next.id);
     });
-    if (cached == null) {
-      _load();
-    } else if (!complete) {
-      // 缓存不完整：后台静默补齐，界面保持已有内容
-      _loadDeferred();
-    }
+    _load();
   }
 
   Future<void> _load({bool force = false}) async {
     if (!mounted) return;
-    if (!force) {
-      final cached = _cache[_source.id];
-      if (cached != null) {
-        setState(() {
-          _feed = cached;
-          _loading = false;
-        });
-        return;
-      }
+    // 离线模式：不发起任何请求，直接显示离线占位
+    if (AppState.instance.offlineMode) {
+      setState(() {
+        _loading = false;
+        _feed = null;
+        _error = null;
+      });
+      return;
     }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+
+    // ---- 有缓存就直接用，不闪骨架屏 ----
+    //
+    // 以前这里无条件 `_feed = null; _loading = true`，于是每次回到发现页
+    // （甚至每次冷启动）都先白一下再等网络 —— 明明 `_cache` 里有上次的完整
+    // 数据却从没用上。现在：有缓存 → 立刻渲染，后台静默刷新；
+    // 没缓存（首次 / 切源）→ 才显示骨架屏。
+    final cached = _cache[_source.id];
+    final hasCache = !force && cached != null && cached.sections.isNotEmpty;
+    if (hasCache) {
+      setState(() {
+        _feed = cached;
+        _loading = false;
+        _error = null;
+        _deferredLoading = !_cacheComplete.contains(_source.id);
+      });
+    } else {
+      setState(() {
+        _loading = true;
+        _feed = null;
+        _error = null;
+      });
+    }
+
     try {
       final feed = await _source.home();
       if (!mounted) return;
@@ -175,6 +184,11 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
       if (_source is JmSource) _loadDeferred();
     } catch (e) {
       if (!mounted) return;
+      // 有缓存时刷新失败不打断浏览：保留旧内容，不弹错误页
+      if (hasCache) {
+        setState(() => _deferredLoading = false);
+        return;
+      }
       setState(() {
         _error = '$e';
         _loading = false;
@@ -215,16 +229,28 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
     _pendingFabTag = 'fab_${_source.id}_${c.id}';
     _pendingCoverTag = coverTag ?? 'cover_${_source.id}_${c.id}';
     setState(() {});
+    // **必须等一帧**：Hero 需要源 widget 真正出现在 widget 树上并完成
+    // 布局，才会注册到 Navigator 的 heroController。
+    // 之前 setState 后立刻 push，列表侧的 Hero 还没被 build，
+    // 于是 pop 回来时找不到起点 —— 表现正是「收回动画完全没有」。
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => UnifiedDetailPage(
-                      source: _source,
-                      comic: c,
-                      coverTag: _pendingCoverTag,
-                    ),
+      detailRoute(builder: (_) => UnifiedDetailPage(
+          source: _source,
+          comic: c,
+          coverTag: _pendingCoverTag,
+        ),
       ),
     );
-    // 返回后清空，避免 tag 残留导致后续转场飞向错误位置
+    // 返回后清空，避免 tag 残留导致后续转场飞向错误位置。
+    //
+    // 注意：必须等 pop 的**反向转场完全结束**再清空，
+    // 否则 Hero 在飞行途中失去目标（tag 变 null → Hero 被移除），
+    // 收回动画会直接中断/消失。
+    // push 的 Future 在 pop 动画开始时就已经完成，所以这里再等一帧
+    // 之后的整段动画时长。
+    await Future<void>.delayed(const Duration(milliseconds: 620));
     if (mounted) {
       setState(() {
         _pendingFabTag = null;
@@ -250,22 +276,7 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
               slivers: [
                 _buildAppBar(),
                 if (_loading)
-                  SliverPadding(
-                    padding: const EdgeInsets.all(AppStyle.pagePadding),
-                    sliver: SliverGrid(
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 10,
-                        childAspectRatio: 0.54,
-                      ),
-                      delegate: SliverChildBuilderDelegate(
-                        (_, _) => const ShimmerBox(),
-                        childCount: 9,
-                      ),
-                    ),
-                  )
+                  SliverToBoxAdapter(child: _buildSkeleton())
                 else if (_error != null)
                   SliverFillRemaining(
                     hasScrollBody: false,
@@ -273,6 +284,16 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
                       message: L.tp('loadFailedWith', {'e': '$_error'}),
                       icon: Icons.cloud_off_outlined,
                       onRetry: _load,
+                    ),
+                  )
+                // 离线模式：发现页（在线内容）整体不可用，
+                // 只给一个明确的空态，不回落到可能过时的缓存
+                else if (AppState.instance.offlineMode)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: EmptyView(
+                      message: L.t('offlineNoOnlineContent'),
+                      icon: Icons.cloud_off_rounded,
                     ),
                   )
                 else if (_feed != null) ...[
@@ -347,29 +368,34 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
       ],
       flexibleSpace: FlexibleSpaceBar(
         collapseMode: CollapseMode.pin,
-        titlePadding: const EdgeInsets.only(left: 16, bottom: 14, right: 80),
-        title: LayoutBuilder(
-          builder: (context, constraints) {
-            final t = (1 -
-                    ((constraints.maxHeight - kToolbarHeight) / 46.0)
-                        .clamp(0.0, 1.0))
-                .toDouble();
-            final size = lerpDouble(28, 19, t)!;
-            return Row(
-              children: [
-                Text(
+        titlePadding: const EdgeInsets.only(left: 16, bottom: 14, right: 72),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 折叠进度只由滚动偏移决定（不再读 constraints.maxHeight）：
+            // 切源时会先把内容换成骨架屏，sliver 布局在那一帧会抖动，
+            // 若字号跟着 constraints 走就会「跳一下」。
+            AnimatedBuilder(
+              animation: _scroll,
+              builder: (context, _) {
+                final v = _scroll.hasClients ? _scroll.position.pixels : 0.0;
+                final t = (v / 46.0).clamp(0.0, 1.0).toDouble();
+                final size = lerpDouble(28, 19, t)!;
+                return Text(
                   L.t('tabDiscover'),
                   style: theme.textTheme.headlineMedium?.copyWith(
                     fontSize: size,
-                    fontWeight: t < 0.5 ? FontWeight.w700 : FontWeight.w500,
+                    // 只变大小、**字重保持不变**（用户要求）。
+                    // 之前滚动时粗细在 w700/w500 之间切换，
+                    // 视觉上像在「抖」，因为字重变化会改变字宽。
+                    fontWeight: FontWeight.w700,
                     color: theme.colorScheme.onSurface,
                   ),
-                ),
-                const SizedBox(width: 10),
-                SourceSwitcher(activeId: _source.id),
-              ],
-            );
-          },
+                );
+              },
+            ),
+            // 源切换器已移除：EH 源整体下架，只保留 JM。
+          ],
         ),
       ),
     );
@@ -381,9 +407,8 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
     final items = <(Widget Function(Color), String, Widget)>[
       ((c) => AppIcons.anime(size: 21, color: c), L.t('anime'), AnimePage()),
       ((c) => AppIcons.novel(size: 21, color: c), L.t('novels'), NovelsPage()),
-      ((c) => Icon(Icons.calendar_view_week_outlined, size: 20, color: c),
-          L.t('weeklyMustSee'), WeekPage()),
-      ((c) => Icon(Icons.history_rounded, size: 20, color: c),
+      ((c) => Icon(Icons.auto_awesome_rounded, size: 20, color: c),
+          L.t('weeklyMustSee'), WeekPage()),      ((c) => Icon(Icons.history_rounded, size: 20, color: c),
           L.t('history'), HistoryPage()),
     ];
     return SliverToBoxAdapter(
@@ -496,6 +521,68 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
     );
   }
 
+  /// 加载骨架屏。
+  ///
+  /// 布局必须与真实网格**完全一致**（Wrap + 同宽卡片 + 同比例封面），
+  /// 否则骨架屏切到真实内容时卡片位置会跳变。
+  Widget _buildSkeleton() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppStyle.pagePadding,
+        8,
+        AppStyle.pagePadding,
+        0,
+      ),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          const cols = 3;
+          const gap = 8.0;
+          final cardW = (box.maxWidth - gap * (cols - 1)) / cols;
+          return Wrap(
+            spacing: gap,
+            runSpacing: 10,
+            children: [
+              for (var i = 0; i < 9; i++)
+                SizedBox(
+                  width: cardW,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 封面占位（3:4）
+                      AspectRatio(
+                        aspectRatio: 3 / 4,
+                        child: ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(AppStyle.cardRadius),
+                          child: const ShimmerBox(),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      // 标题占位
+                      const ShimmerBox(height: 14, radius: 4),
+                      const SizedBox(height: 4),
+                      // 作者占位
+                      FractionallySizedBox(
+                        widthFactor: 0.6,
+                        child: const ShimmerBox(height: 11, radius: 4),
+                      ),
+                      const SizedBox(height: 6),
+                      // 日期行占位
+                      FractionallySizedBox(
+                        widthFactor: 0.4,
+                        child: const ShimmerBox(height: 11, radius: 4),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildSection(HomeSection s) {
     if (s.items.isEmpty) return const SliverToBoxAdapter();
     return SliverToBoxAdapter(
@@ -522,33 +609,42 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
               padding: const EdgeInsets.symmetric(
                 horizontal: AppStyle.pagePadding,
               ),
-              child: GridView.builder(
-                shrinkWrap: true,
-                // shrinkWrap 网格不允许滚动，否则高度计算异常
-                physics: const NeverScrollableScrollPhysics(),
-                padding: EdgeInsets.zero,
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 10,
-                  // 3:4 封面 + 两行标题 ≈ 0.52
-                  childAspectRatio: 0.52,
-                ),
-                itemCount: s.items.length > 12 ? 12 : s.items.length,
-                itemBuilder: (context, i) {
-                  final c = s.items[i];
-                  return ComicCard(
-                    title: c.name,
-                    subtitle: c.author,
-                    cover: _source.coverOf(c),
-                    heat: c.heat == null ? null : '${c.heat}',
-                    category: c.category,
-                    heroTag: 'cover_${_source.id}_${c.id}_${s.title}',
-                    onTap: () => _openComic(
-                      c,
-                      coverTag: 'cover_${_source.id}_${c.id}_${s.title}',
-                    ),
+              // 用 Wrap 代替 GridView：卡片高度由内容自然撑开，
+              // 不再依赖 childAspectRatio 估算，因此永不裁切。
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  const cols = 3;
+                  const gap = 8.0;
+                  final cardW = (box.maxWidth - gap * (cols - 1)) / cols;
+                  final items = s.items.length > 12 ? 12 : s.items.length;
+                  // 不指定固定高度：卡片内容高度随「是否有作者」变化，
+                  // 固定值必然在一侧裁切。交给 IntrinsicHeight 自然测量。
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: 10,
+                    children: [
+                      for (var i = 0; i < items; i++)
+                        SizedBox(
+                          width: cardW,
+                          child: Builder(
+                            builder: (context) {
+                              final c = s.items[i];
+                              final tag =
+                                  'cover_${_source.id}_${c.id}_${s.title}';
+                              return ComicCard(
+                                title: c.name,
+                                subtitle: c.author,
+                                cover: _source.coverOf(c),
+                                heat: c.heat == null ? null : '${c.heat}',
+                                category: c.category,
+                                heroTag: tag,
+                                onTap: () =>
+                                    _openComic(c, coverTag: tag),
+                              );
+                            },
+                          ),
+                        ),
+                    ],
                   );
                 },
               ),
@@ -557,6 +653,12 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
             SizedBox(
               height: 208,
               child: ListView.separated(
+                // 必须带 key：推荐分区是异步补进来的，会**插到最前面**，
+                // 同一树位置上的横滑列表会换成另一批数据。
+                // 没有 key 时 PageStorage 按「树位置」恢复滚动偏移，
+                // 新数据会继承上一个分区的偏移 —— 表现就是
+                // 「横滑组刚加载出来就整体左移约一张卡片」。
+                key: PageStorageKey('hrow_${_source.id}_${s.title}'),
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(
                   horizontal: AppStyle.pagePadding + 4,
@@ -590,136 +692,52 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
   }
 }
 
-/// 全局数据源注册表（JM / EH 切换，全局共享）。
+/// 全局数据源注册表（EH 源已下架，恒为 JM）。
 class SourceRegistry {
   SourceRegistry._();
+  // 固定为 JM：EH 源整体下架，不保留切换入口
   static final ValueNotifier<ComicSource> notifier =
       ValueNotifier<ComicSource>(JmSource.instance);
 
-  static ComicSource get current => notifier.value;
-  static void set(ComicSource s) => notifier.value = s;
+  static ComicSource get current => JmSource.instance;
+  static void set(ComicSource s) {
+    // 忽略任何试图切换到非 JM 源的请求
+    if (s.id != 'jm') return;
+    notifier.value = s;
+  }
+
   static void addListener(VoidCallback fn) => notifier.addListener(fn);
   static void removeListener(VoidCallback fn) => notifier.removeListener(fn);
 }
 
-/// 统一的源切换控件：高亮块以**非线性缓动平移**（而非淡出淡入）。
-class SourceSwitcher extends StatefulWidget {
+/// 源切换器已移除（EH 源下架，仅保留 JM）。
+///
+/// 保留一个空实现供筛选面板等旧调用处兼容，避免大范围改动；
+/// 它只渲染一个「JM」静态标签，不提供任何切换能力。
+class SourceSwitcher extends StatelessWidget {
   final String activeId;
   const SourceSwitcher({super.key, required this.activeId});
 
   @override
-  State<SourceSwitcher> createState() => _SourceSwitcherState();
-}
-
-class _SourceSwitcherState extends State<SourceSwitcher> {
-  static const _sources = <(String, String)>[
-    ('jm', 'JM'),
-    ('ehentai', 'EH'),
-  ];
-
-  static const _pad = EdgeInsets.symmetric(horizontal: 10, vertical: 4);
-  static const _fontSize = 11.0;
-
-  int get _index =>
-      _sources.indexWhere((s) => s.$1 == widget.activeId).clamp(0, 1);
-
-  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-
     return Container(
-      padding: const EdgeInsets.all(2),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(20),
+        color: scheme.primary,
+        borderRadius: BorderRadius.circular(999),
       ),
-      child: LayoutBuilder(
-        builder: (context, c) {
-          // 两段等宽（用文本测量保证宽度自然）
-          final widths = _sources.map((s) {
-            final tp = TextPainter(
-              text: TextSpan(
-                text: s.$2,
-                style: TextStyle(
-                  fontSize: _fontSize,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              textDirection: TextDirection.ltr,
-            )..layout();
-            return tp.width + _pad.horizontal;
-          }).toList();
-          final segW = widths[_index];
-          final totalW = widths.reduce((a, b) => a + b);
-          // 高亮块左偏移 = 前面所有段的宽度累加（两段不等宽也准确）
-          final leftOffset = _index == 0 ? 0.0 : widths.first;
-
-          return SizedBox(
-            height: _fontSize + _pad.vertical + 2,
-            width: totalW,
-            child: Stack(
-              children: [
-                // 平移高亮块：easeInOutCubic 非线性缓动
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 380),
-                  curve: Curves.easeInOutCubic,
-                  left: leftOffset,
-                  top: 0,
-                  bottom: 0,
-                  width: segW,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: scheme.primary,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                  ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: _sources.asMap().entries.map((e) {
-                    final active = e.key == _index;
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        if (active) return;
-                        final target = e.value.$1 == 'jm'
-                            ? JmSource.instance
-                            : EhSource.instance;
-                        SourceRegistry.set(target);
-                      },
-                      child: SizedBox(
-                        width: widths[e.key],
-                        child: AnimatedDefaultTextStyle(
-                          duration: const Duration(milliseconds: 380),
-                          curve: Curves.easeInOutCubic,
-                          style: TextStyle(
-                            fontSize: _fontSize,
-                            fontWeight: FontWeight.w700,
-                            color: active
-                                ? scheme.onPrimary
-                                : scheme.onSurfaceVariant,
-                          ),
-                          child: Padding(
-                            padding: _pad,
-                            child: Text(
-                              e.value.$2,
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          );
-        },
+      child: Text(
+        'JM',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: scheme.onPrimary,
+        ),
       ),
     );
   }
 }
-
 class _HeroCard extends StatelessWidget {
   final Comic comic;
   final String? cover;

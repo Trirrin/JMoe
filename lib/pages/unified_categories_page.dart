@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/app_state.dart';
 import '../core/app_theme.dart';
 import '../core/models.dart';
 import '../core/source.dart';
@@ -196,6 +197,15 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
   Widget build(BuildContext context) {
     super.build(context);
     final theme = Theme.of(context);
+    // 离线模式：分类页完全是在线内容，直接给明确空态
+    if (AppState.instance.offlineMode) {
+      return Scaffold(
+        body: EmptyView(
+          message: L.t('offlineNoOnlineContent'),
+          icon: Icons.cloud_off_rounded,
+        ),
+      );
+    }
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -459,8 +469,7 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
                           crossAxisCount: 2,
                           loadingCount: _hasMore ? 2 : 0,
                           onTap: (c) => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
+                            MaterialPageRoute(builder: (_) =>
                                   UnifiedDetailPage(source: _source, comic: c),
                             ),
                           ),

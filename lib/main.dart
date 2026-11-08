@@ -1,10 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'core/collect_store.dart';
+import 'core/host_store.dart';
+import 'core/subscription_checker.dart';
+import 'core/subscription_store.dart';
+import 'widgets/clipboard_link_watcher.dart';
+import 'widgets/global_nav_bar.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 
+import 'core/app_log.dart';
 import 'core/app_state.dart';
+import 'core/jm_protocol.dart';
 import 'core/app_theme.dart';
 import 'core/downloader.dart';
 import 'core/image_cache.dart';
@@ -12,6 +20,7 @@ import 'core/jm_service.dart';
 import 'core/l10n.dart';
 import 'core/reader_settings.dart';
 import 'core/reading_stats.dart';
+import 'core/temp_store.dart';
 import 'pages/startup_host_page.dart';
 import 'pages/main_page.dart';
 
@@ -59,9 +68,26 @@ class _AppBootstrapState extends State<AppBootstrap> {
           .loadSettings(imgShunt: state.imageShunt)
           .timeout(const Duration(seconds: 12));
     } catch (_) {}
+    // 校验本地会话是否还有效：token 过期时界面会显示「已登录」但
+    // 收藏/历史全空，用户完全看不出发生了什么。这里主动探一次。
+    if (state.loggedIn) {
+      unawaited(_verifyLogin());
+    }
     try {
       await ImageCacheManager.instance.diskUsage();
     } catch (_) {}
+  }
+
+  /// 会话失效则清理本地凭据，下次进书架会引导重新登录。
+  Future<void> _verifyLogin() async {
+    final valid = await JmService.instance.verifySession();
+    if (valid != false) return; // true / null（网络问题）都不动会话
+    final state = AppState.instance;
+    await state.saveSession(null, null);
+    JmApi.instance.jwtToken = null;
+    JmApi.instance.cookieValue = null;
+    unawaited(AppLog.instance.log('AUTH', 'session expired, logged out'));
+    print('[JMOE] session expired → cleared local session');
   }
 
   @override
@@ -83,8 +109,16 @@ void main() async {
         ThemeMode.system => 'system',
       };
   await ReadingStats.instance.load();
+  await SubscriptionStore.instance.load();
+  await CollectStore.instance.load();
+  await HostStore.instance.load();
+  // 订阅更新检查（每 6 小时一次，发现新章发系统通知）
+  SubscriptionChecker.instance.start();
   // 恢复已下载记录（扫描磁盘上的 meta.json，重启后仍可见）
   await ChapterDownloader.restoreFromDisk();
+  // 清理上个进程遗留的大章节临时目录（引用计数已随进程丢失，
+  // 留着只会占空间；请看门狗说明见 TempStore.sweepOnStartup）
+  unawaited(TempStore.instance.sweepOnStartup());
   runApp(const JmoeApp());
 }
 
@@ -160,7 +194,22 @@ class _JmoeAppState extends State<JmoeApp> {
             systemNavigationBarIconBrightness:
                 isDark ? Brightness.light : Brightness.dark,
           ),
-          child: child ?? const SizedBox.shrink(),
+          // 剪贴板链接探测：包在 Navigator 之外、MaterialApp 之内，
+          // 这样**任何页面**上都能弹出询问面板（用户要求「无论当前
+          // 属于什么页面」）。它本身不渲染任何东西，只监听生命周期。
+          //
+          // 底部导航栏也画在这一层：它在 Navigator 之外，所以层级
+          // **高于 Hero 飞行层** → 封面飞过时会被导航栏挡住
+          // （用户要求「导航栏不动，但遮挡封面 hero」）。
+          child: Stack(
+            children: [
+              ClipboardLinkWatcher(
+                child: child ?? const SizedBox.shrink(),
+              ),
+              // 导航栏浮在最上层
+              const GlobalNavBar(),
+            ],
+          ),
         );
       },
       home: const AppBootstrap(),

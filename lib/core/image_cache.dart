@@ -15,6 +15,8 @@ import 'package:pointycastle/block/modes/cbc.dart';
 
 
 import 'jm_protocol.dart';
+import 'jm_service.dart';
+import 'app_log.dart';
 import 'net_throttle.dart';
 
 /// 统一的图片缓存：**加密磁盘存储** + 内存 LRU + 并发去重 + 整章预缓存。
@@ -40,13 +42,36 @@ class ImageCacheManager {
   /// LRU 顺序（_bytesCache）
   final List<String> _lru = [];
 
+  /// 每张图在内存中占的字节数（用于按字节预算淘汰）
+  final Map<String, int> _bytesSize = {};
+
+  /// 解码图占用的估算字节（width * height * 4）
+  final Map<String, int> _uiSize = {};
+
   /// 「正在显示」的图片（如详情页封面）：淘汰时跳过，避免闪白
   final Set<String> _pinned = {};
 
+  // ---- 内存预算 ----
+  //
+  // 早期按「条数」限制（512 条字节 + 200 条解码图），但一张 3000×4000 的
+  // 大图解码后就是 ~48MB，200 条理论上是 GB 级 —— 手机直接 OOM。
+  // 因此全部改成**按字节**限额，超限即按 LRU 淘汰。
+
+  /// 原始字节缓存上限（默认 96MB）
+  static const int _maxBytesTotal = 96 * 1024 * 1024;
+
+  /// 解码图缓存上限（默认 128MB）
+  static const int _maxUiTotal = 128 * 1024 * 1024;
+
+  /// 条数上限仍保留一道，避免「大量极小图」把 Map 撑爆
   static const int _maxUiImages = 200;
-  // 163 → 512：首页一屏封面 + 详情页封面能同时留住，
-  // 避免详情页刚打开就被 LRU 挤出导致封面闪白。
   static const int _maxBytes = 512;
+
+  int _bytesTotal = 0;
+  int _uiTotal = 0;
+
+  /// 当前内存占用（原始字节 + 解码图估算），供设置页/日志展示。
+  int get memoryBytes => _bytesTotal + _uiTotal;
 
   /// 封面/图片加载并发上限：超出排队，避免滚动时抢占 I/O 导致卡顿。
   static const int _maxConcurrent = 6;
@@ -142,6 +167,23 @@ class ImageCacheManager {
       return mem;
     }
     return null;
+  }
+
+  /// **仅读磁盘**：解密后返回，但**不写入内存缓存**。
+  ///
+  /// 给「大章节落临时目录」用：那时我们只想要字节去写临时文件，
+  /// 不希望它被塞进内存 LRU（整章几百 MB 会直接把内存挤爆）。
+  Future<Uint8List?> readDiskOnly(String url) async {
+    try {
+      await _ensureDir();
+      final f = _fileFor(url);
+      if (f == null || !f.existsSync()) return null;
+      final plain = decryptBytes(await f.readAsBytes(), url);
+      if (plain == null || plain.isEmpty) return null;
+      return plain;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 异步获取：内存 → 磁盘(解密) → 网络(并加密落盘)。
@@ -260,14 +302,24 @@ class ImageCacheManager {
       (_fileFor(url)?.existsSync() ?? false);
 
   void _putBytes(String url, Uint8List b) {
+    // 覆盖旧值时先扣掉旧尺寸，否则预算会越算越大
+    final old = _bytesSize[url];
+    if (old != null) _bytesTotal -= old;
     _bytesCache[url] = b;
+    _bytesSize[url] = b.length;
+    _bytesTotal += b.length;
     _touch(url);
-    // 淘汰最久未用的，但**跳过正在显示的**（pinned），
-    // 否则详情页封面会在打开瞬间被挤出缓存而闪白。
+    _evictBytes();
+  }
+
+  /// 按字节预算淘汰（同时保留条数上限作为兜底）。
+  ///
+  /// 跳过 pinned（正在显示的图），避免详情页封面被挤出后闪白。
+  void _evictBytes() {
     var guard = 0;
-    while (_bytesCache.length > _maxBytes && guard++ < 4096) {
+    while ((_bytesTotal > _maxBytesTotal || _bytesCache.length > _maxBytes) &&
+        guard++ < 4096) {
       if (_lru.isEmpty) break;
-      // 从头部找第一个非 pinned 项
       var evictIndex = -1;
       for (var i = 0; i < _lru.length; i++) {
         if (!_pinned.contains(_lru[i])) {
@@ -278,6 +330,9 @@ class ImageCacheManager {
       if (evictIndex < 0) break; // 全是 pinned，放弃本次淘汰
       final oldest = _lru.removeAt(evictIndex);
       _bytesCache.remove(oldest);
+      final sz = _bytesSize.remove(oldest);
+      if (sz != null) _bytesTotal -= sz;
+      if (_bytesTotal < 0) _bytesTotal = 0;
     }
   }
 
@@ -303,14 +358,37 @@ class ImageCacheManager {
   ui.Image? getUiSync(String url) => _uiCache[url];
 
   void putUi(String url, ui.Image img) {
+    final old = _uiSize[url];
+    if (old != null) _uiTotal -= old;
     _uiCache[url] = img;
-    // 不 dispose 被淘汰对象：阅读器可能仍持有该 ui.Image，
-    // dispose 后会导致 RawImage 渲染成灰色。交由 GC 回收。
-    while (_uiCache.length > _maxUiImages) {
-      final oldest = _uiCache.keys.first;
-      if (oldest == url) break;
-      _uiCache.remove(oldest);
+    final sz = img.width * img.height * 4;
+    _uiSize[url] = sz;
+    _uiTotal += sz;
+    _touchUi(url);
+    // 按字节预算淘汰，再兜一道条数上限
+    var guard = 0;
+    while ((_uiTotal > _maxUiTotal || _uiCache.length > _maxUiImages) &&
+        guard++ < 4096) {
+      if (_uiLru.isEmpty) break;
+      final oldest = _uiLru.first;
+      if (oldest == url) break; // 刚放进去的别立刻删
+      _uiLru.removeAt(0);
+      // 不 dispose 被淘汰对象：阅读器可能仍持有该 ui.Image，
+      // dispose 后会导致 RawImage 渲染成灰色。交由 GC 回收。
+      final removed = _uiCache.remove(oldest);
+      if (removed == null) continue;
+      final s = _uiSize.remove(oldest);
+      if (s != null) _uiTotal -= s;
     }
+    if (_uiTotal < 0) _uiTotal = 0;
+  }
+
+  /// 解码图 LRU 顺序
+  final List<String> _uiLru = [];
+
+  void _touchUi(String url) {
+    _uiLru.remove(url);
+    _uiLru.add(url);
   }
 
   static Future<ui.Image?> decode(Uint8List bytes) async {
@@ -371,6 +449,27 @@ class ImageCacheManager {
     return done;
   }
 
+  /// 精确删除单张图片（内存 + 磁盘）。
+  ///
+  /// 用于「只删某一章缓存」：不能整目录清光，否则删一本会连带清掉全部。
+  Future<void> evict(String url) async {
+    try {
+      final old = _bytesSize.remove(url);
+      if (old != null) _bytesTotal -= old;
+      _bytesCache.remove(url);
+      _lru.remove(url);
+      final ui = _uiCache.remove(url);
+      ui?.dispose();
+      final uiOld = _uiSize.remove(url);
+      if (uiOld != null) _uiTotal -= uiOld;
+      _uiLru.remove(url);
+      _pinned.remove(url);
+      await _ensureDir();
+      final f = _fileFor(url);
+      if (f != null && await f.exists()) await f.delete();
+    } catch (_) {}
+  }
+
   Future<void> clearDisk() async {
     try {
       final d = await _ensureDir();
@@ -382,11 +481,16 @@ class ImageCacheManager {
         }
       }
       _bytesCache.clear();
+      _bytesSize.clear();
       _lru.clear();
+      _bytesTotal = 0;
       for (final i in _uiCache.values) {
         i.dispose();
       }
       _uiCache.clear();
+      _uiSize.clear();
+      _uiLru.clear();
+      _uiTotal = 0;
     } catch (_) {}
   }
 
@@ -458,6 +562,10 @@ class _CachedCoverState extends State<CachedCover> {
     }
     ImageCacheManager.instance.load(url, fetcher: _fetch).then((b) {
       if (!mounted) return;
+      if (b == null) {
+        // 记一条日志：封面全灰时至少要能看出「是取图失败还是解码失败」
+        unawaited(AppLog.instance.log('IMG', 'cover fetch failed: $url'));
+      }
       setState(() {
         _bytes = b;
         _failed = b == null;
@@ -465,8 +573,21 @@ class _CachedCoverState extends State<CachedCover> {
     });
   }
 
-  static Future<Uint8List?> _fetch(String url) =>
-      JmApi.instance.fetchBytes(url);
+  static Future<Uint8List?> _fetch(String url) async {
+    final b = await JmApi.instance.fetchBytes(url);
+    if (b != null) return b;
+    // 取图失败：服务端可能下发了一个死掉的 CDN 域名。
+    // 依次换成像 cdns 再试 —— 这是「封面全灰」的自愈路径。
+    for (final alt in JmService.instance.imageUrlCandidates(url)) {
+      final r = await JmApi.instance.fetchBytes(alt);
+      if (r != null) {
+        print('[JMOE] cover mirror ok: $alt');
+        return r;
+      }
+    }
+    print('[JMOE] cover fetch FAILED (all mirrors): $url');
+    return null;
+  }
 
   @override
   void dispose() {

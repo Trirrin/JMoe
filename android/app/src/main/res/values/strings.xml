@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用名称：activity-alias 的 label 引用它，
+         运行时改这个值即可改桌面显示名（需重启桌面/重装）。 -->
+    <string name="app_name">JMoe</string>
+</resources>

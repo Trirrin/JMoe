@@ -3,8 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/app_state.dart';
+import '../core/host_store.dart';
 import '../core/jm_protocol.dart';
+import '../core/jm_service.dart';
 import '../core/l10n.dart';
+import '../widgets/app_toast.dart';
 
 /// 启动线路页：并发测速 → 展示结果 → 用户可自行选线进入。
 ///
@@ -30,19 +33,33 @@ class _HostResult {
   /// 线路固定编号（1 起），来自线路表的原始顺序，**永不随测速结果改变**。
   final int order;
 
-  _HostResult(this.host, this.label, this.latency, this.order);
+  /// 是否为图片源（图片源与 API 线路分两组展示）
+  final bool isImage;
+
+  _HostResult(this.host, this.label, this.latency, this.order,
+      {this.isImage = false});
 
   bool get ok => latency != null;
 }
 
 class _StartupHostPageState extends State<StartupHostPage> {
   final List<_HostResult> _results = [];
+
+  /// 图片源测速结果（单独一组，与 API 线路并列展示）
+  final List<_HostResult> _imgResults = [];
+
+  /// 选中的图片源（默认第一个）
+  String? _selectedImg;
+
+  /// 最快的图片源（测速完成后计算，用于打「最快」标记）
+  String? _bestImg;
+
   bool _testing = true;
   String? _selected;
   String? _best;
 
   Timer? _countdown;
-  int _secondsLeft = 10;
+  int _secondsLeft = 3;
   bool _userInteracted = false;
   bool _entering = false;
 
@@ -52,6 +69,50 @@ class _StartupHostPageState extends State<StartupHostPage> {
   void initState() {
     super.initState();
     _start();
+  }
+
+  /// 固定线路快进：若用户开启了「跳过启动页」，
+  /// 直接用**上次进入所用的线路**连接并进入主界面。
+  ///
+  /// 设计要点（按用户要求）：
+  ///  * 「跳过启动页」是**独立开关**，不绑定某条具体线路
+  ///  * 跳过后使用「最后一次进入的线路」（lastHost），没有则用 apiHost
+  ///  * 该线路连不通时**回落到正常启动页**，避免用户被死线路卡住
+  Future<bool> _tryPinnedShortcut() async {
+    if (!HostStore.instance.skipStartup) return false;
+    final api = JmApi.instance;
+    api.lang = AppState.instance.lang;
+    final preferred =
+        AppState.instance.apiHost.isNotEmpty
+            ? AppState.instance.apiHost
+            : (AppState.instance.lastHost ?? '');
+    if (preferred.isEmpty) return false;
+    await api.loadHostList();
+    if (!mounted) return false;
+    // 确保候选表里有这条线路（可能是用户自定义的）
+    if (!api.hosts.any((h) => h[0] == preferred)) {
+      api.hosts = [
+        ...api.hosts,
+        [preferred, preferred],
+      ];
+    }
+    // 轻量探活：能通就直接进，失败则回落到正常启动页
+    final ms = await api.measure(preferred);
+    if (!mounted) return false;
+    if (ms == null) {
+      AppToast.show(
+        context,
+        L.t('pinnedHostUnreachable'),
+        icon: Icons.wifi_off_rounded,
+        accent: Theme.of(context).colorScheme.error,
+      );
+      return false;
+    }
+    await api.switchHostQuiet(preferred);
+    await AppState.instance.setLastHost(preferred);
+    if (!mounted) return false;
+    widget.onReady();
+    return true;
   }
 
   @override
@@ -65,11 +126,17 @@ class _StartupHostPageState extends State<StartupHostPage> {
     setState(() {
       _testing = true;
       _results.clear();
+      _imgResults.clear();
       _selected = null;
+      _selectedImg = null;
       _best = null;
       _userInteracted = false;
-      _secondsLeft = 10;
+      _secondsLeft = 3;
     });
+
+    // 开了「跳过启动页」→ 直接用上次的线路进（失败会回落到正常流程）
+    if (await _tryPinnedShortcut()) return;
+    if (!mounted) return;
 
     final api = JmApi.instance;
     api.lang = AppState.instance.lang;
@@ -77,7 +144,9 @@ class _StartupHostPageState extends State<StartupHostPage> {
     await api.loadHostList();
     if (!mounted) return;
 
-    final hosts = api.hosts;
+    // 合并自定义线路：用户添加的线路要出现在这里，
+    // 否则「启动时也能看到」这个诉求就不成立。
+    final hosts = HostStore.instance.mergeWith(api.hosts);
     setState(() {
       for (var idx = 0; idx < hosts.length; idx++) {
         final h = hosts[idx];
@@ -89,10 +158,25 @@ class _StartupHostPageState extends State<StartupHostPage> {
           idx + 1,
         ));
       }
+      // 图片源：与 API 线路并列测速。
+      // 默认选中**第一个**（按用户要求），之后测速完成也不改选，
+      // 免得用户刚想选就被自动切换打乱。
+      final imgHosts = JmService.instance.imgHostCandidates;
+      for (var idx = 0; idx < imgHosts.length; idx++) {
+        _imgResults.add(_HostResult(
+          imgHosts[idx],
+          'IMG ${idx + 1}',
+          null,
+          idx + 1,
+          isImage: true,
+        ));
+      }
+      if (_imgResults.isNotEmpty) _selectedImg = _imgResults.first.host;
     });
 
-    await Future.wait(
-      hosts.map((h) async {
+    await Future.wait([
+      // API 线路测速
+      ...hosts.map((h) async {
         final ms = await api.measure(h[0]);
         if (!mounted) return;
         final raw = h.length > 1 ? h[1] : h[0];
@@ -108,12 +192,30 @@ class _StartupHostPageState extends State<StartupHostPage> {
           }
         });
       }),
-    );
+      // 图片源测速
+      ..._imgResults.map((r) async {
+        final ms = await JmService.instance.measureImgHost(r.host);
+        if (!mounted) return;
+        setState(() {
+          final i = _imgResults.indexWhere((e) => e.host == r.host);
+          if (i >= 0) {
+            final old = _imgResults[i];
+            _imgResults[i] = _HostResult(
+              old.host,
+              old.label,
+              ms,
+              old.order,
+              isImage: true,
+            );
+          }
+        });
+      }),
+    ]);
     if (!mounted) return;
 
     setState(() {
       _testing = false;
-      // 列表顺序保持线路表原始顺序（编号固定），只计算最快项并选中它
+      // API 线路：列表顺序保持原顺序（编号固定），只算最快项并选中
       _best = _anyOk
           ? (_results.where((r) => r.ok).toList()
                 ..sort((a, b) =>
@@ -122,6 +224,14 @@ class _StartupHostPageState extends State<StartupHostPage> {
               .host
           : null;
       _selected = _best;
+      // 图片线路：测速完成后**改选最快的**（默认先选第一个，测完再切换）。
+      // 用户要求：「图片线路默认选第一个，测完速再选最快的」。
+      final okImgs = _imgResults.where((r) => r.ok).toList()
+        ..sort((a, b) =>
+            (a.latency ?? 99999).compareTo(b.latency ?? 99999));
+      if (okImgs.isNotEmpty) _selectedImg = okImgs.first.host;
+      // 记录最快的图片源，用于给它打「最快」标记
+      _bestImg = okImgs.isNotEmpty ? okImgs.first.host : null;
     });
 
     if (_best != null) {
@@ -138,7 +248,7 @@ class _StartupHostPageState extends State<StartupHostPage> {
   void _startCountdown() {
     _countdown?.cancel();
     if (_userInteracted || !_anyOk) return;
-    setState(() => _secondsLeft = 10);
+    setState(() => _secondsLeft = 3);
     _countdown = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted || _userInteracted) {
         timer.cancel();
@@ -162,6 +272,24 @@ class _StartupHostPageState extends State<StartupHostPage> {
     _entering = true;
     await JmApi.instance.switchHostQuiet(host);
     await AppState.instance.setLastHost(host);
+    // 同时应用选中的图片源（默认第一个）
+    final img = _selectedImg;
+    if (img != null && img.isNotEmpty) {
+      JmService.instance.setImgHost(img);
+      await AppState.instance.setImgHost(img);
+    }
+    if (!mounted) return;
+    widget.onReady();
+  }
+
+  /// 离线模式：跳过测速与线路选择，直接进入主界面。
+  ///
+  /// 只使用本地已下载 / 已缓存内容，不发起任何网络请求。
+  Future<void> _enterOffline() async {
+    _countdown?.cancel();
+    if (_entering) return;
+    _entering = true;
+    await AppState.instance.setOfflineMode(true);
     if (!mounted) return;
     widget.onReady();
   }
@@ -255,18 +383,96 @@ class _StartupHostPageState extends State<StartupHostPage> {
                 ),
               const SizedBox(height: 12),
               Expanded(
-                child: ListView.separated(
-                  itemCount: _results.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, i) => _buildItem(theme, i),
+                child: ListView(
+                  children: [
+                    // ---- API 线路 ----
+                    for (var i = 0; i < _results.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _buildItem(theme, i),
+                      ),
+                    // ---- 图片源（并列测速，默认选第一个）----
+                    if (_imgResults.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          L.t('imageLine'),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      for (var i = 0; i < _imgResults.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _buildImgItem(theme, i),
+                        ),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(height: 12),
+              // ---- 跳过启动页（独立开关）----
+              InkWell(
+                onTap: () async {
+                  await HostStore.instance
+                      .setSkipStartup(!HostStore.instance.skipStartup);
+                  if (mounted) setState(() {});
+                },
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        HostStore.instance.skipStartup
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded,
+                        size: 19,
+                        color: HostStore.instance.skipStartup
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              L.t('skipStartupPage'),
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              L.t('skipStartupPageDesc'),
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  // 用户手动选过线路 → 立即可点（不等测速完成）；
-                  // 否则等测速结束或倒计时结束。
+                  // 进入条件（按用户要求）：
+                  //  * 用户手动选过 API 线路 → **立即可进**（不等图片源测速）
+                  //  * 否则（自动流程）→ 必须**两个都测完**才能进，
+                  //    这样图片源也能选到最快的那个
                   onPressed: _entering ||
                           _selected == null ||
                           (!_userInteracted && _testing)
@@ -278,6 +484,105 @@ class _StartupHostPageState extends State<StartupHostPage> {
                   child: Text(enterLabel),
                 ),
               ),
+              const SizedBox(height: 8),
+              // 离线模式：不联网，直接用已下载 / 已缓存的内容
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _entering ? null : _enterOffline,
+                  icon: const Icon(Icons.cloud_off_rounded, size: 18),
+                  label: Text(L.t('offlineMode')),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 图片源条目：与 API 线路同样的视觉，但选中态独立。
+  Widget _buildImgItem(ThemeData theme, int i) {
+    final scheme = theme.colorScheme;
+    final r = _imgResults[i];
+    final active = _selectedImg == r.host;
+    final selectable = r.ok && !_entering;
+
+    return Material(
+      color: active ? scheme.primaryContainer : scheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: selectable
+            ? () => setState(() => _selectedImg = r.host)
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: active
+                      ? scheme.primary
+                      : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.image_outlined,
+                  size: 15,
+                  color: active ? scheme.onPrimary : scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        r.host.replaceFirst('https://', ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight:
+                              active ? FontWeight.w600 : FontWeight.w400,
+                          color: active ? scheme.onPrimaryContainer : null,
+                        ),
+                      ),
+                    ),
+                    // 「最快」标记：图片源也标出最快的那个
+                    if (_bestImg == r.host && !_testing) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.primary,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          L.t('fastest'),
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onPrimary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              _latencyBadge(scheme, r),
             ],
           ),
         ),
@@ -382,6 +687,45 @@ class _StartupHostPageState extends State<StartupHostPage> {
               ),
               const SizedBox(width: 8),
               _latencyBadge(scheme, r),
+              // 固定这条线路：之后启动直接进，不再看启动页
+              const SizedBox(width: 2),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: L.t('pinThisHost'),
+                icon: Icon(
+                  HostStore.instance.pinnedHost == r.host
+                      ? Icons.push_pin_rounded
+                      : Icons.push_pin_outlined,
+                  size: 17,
+                  color: HostStore.instance.pinnedHost == r.host
+                      ? scheme.primary
+                      : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
+                onPressed: r.ok
+                    ? () async {
+                        final store = HostStore.instance;
+                        final already = store.pinnedHost == r.host;
+                        if (already) {
+                          await store.setPinned('');
+                          await store.setSkipStartup(false);
+                        } else {
+                          await store.setPinned(r.host);
+                          await store.setSkipStartup(true);
+                        }
+                        if (!mounted) return;
+                        setState(() {});
+                        AppToast.show(
+                          context,
+                          already
+                              ? L.t('unpinnedHost')
+                              : L.tp('pinnedHostDone', {'h': r.host}),
+                          icon: already
+                              ? Icons.push_pin_outlined
+                              : Icons.push_pin_rounded,
+                        );
+                      }
+                    : null,
+              ),
             ],
           ),
         ),

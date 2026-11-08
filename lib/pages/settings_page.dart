@@ -1,5 +1,9 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../core/app_info.dart';
 import '../core/app_state.dart';
 import '../core/app_theme.dart';
 import '../core/jm_protocol.dart';
@@ -9,6 +13,9 @@ import 'language_page.dart';
 import 'login_page.dart';
 import 'account_page.dart';
 import 'host_manage_page.dart';
+import '../core/host_store.dart';
+import 'about_page.dart';
+import 'imported_page.dart';
 import 'storage_page.dart';
 import '../core/l10n.dart';
 
@@ -34,6 +41,8 @@ class _SettingsPageState extends State<SettingsPage>
       body: SafeArea(
         bottom: false,
         child: ListView(
+          // 保留滚动位置
+          key: const PageStorageKey('settings_scroll'),
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             Padding(
@@ -50,8 +59,10 @@ class _SettingsPageState extends State<SettingsPage>
             _buildThemeTile(theme, state),
             _buildOledTile(theme, state),
             _buildColorTile(theme, state),
+            _buildBackgroundTile(theme, state),
             SectionHeader(title: L.t('reading')),
             _buildReaderModeTile(theme, state),
+            _buildVolumeKeyTile(theme, state),
             _buildStartTabTile(theme, state),
             _buildBannerTile(theme, state),
             _buildCardSizeTile(theme, state),
@@ -63,31 +74,24 @@ class _SettingsPageState extends State<SettingsPage>
             SectionHeader(title: L.t('network')),
             _buildNetLimitTile(theme, state),
             _buildHostTile(theme, state),
+            _buildSkipStartupTile(theme, state),
             _buildLanguageEntry(theme, state),
                         _buildStorageEntry(theme, state),
             SectionHeader(title: L.t('about')),
             ListTile(
               leading: const Icon(Icons.settings_applications_outlined),
-              title: Text(L.t('version')),
-              subtitle: Text(L.tp('aboutVersion', {'v': '1.3.0', 'p': '2.1.12'})),
+              title: Text(L.t('about')),
+              subtitle: Text(
+                L.tp('aboutVersion', {
+                  'v': appVersion,
+                  'p': appProtocolVersion,
+                }),
+              ),
               trailing: const Icon(Icons.chevron_right, size: 18),
-              onTap: () => showAboutDialog(
-                context: context,
-                applicationName: 'JMoe',
-                applicationVersion: L.tp('versionWithProto', {'v': '1.3.0', 'p': '2.1.12'}),
-                applicationIcon: Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: Icon(
-                    Icons.auto_stories,
-                    size: 40,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                applicationLegalese:
-                    '${L.t('aboutAuthor')}\n'
-                    'GitHub: github.com/liuyuexiaoyu1\n'
-                    '${L.t('aboutLicense')}\n\n'
-                    '${L.t('aboutDesc')}'
+              // 独立页面（不再是系统 AboutDialog）：
+              // 可以放项目主页、反馈、鸣谢等完整信息
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AboutPage()),
               ),
             ),
             // 「清除所有数据」统一放在「存储管理」里，设置页不再重复入口
@@ -255,6 +259,75 @@ class _SettingsPageState extends State<SettingsPage>
           ),
         ],
       ),
+    );
+  }
+
+  /// 跳过启动页（独立开关，随时可开/关）
+  ///
+  /// 开启后启动时不再显示线路页，直接用**上次进入所用的线路**连接。
+  /// 线路连不通会自动回落到启动页，不会把用户卡在门外。
+  Widget _buildSkipStartupTile(ThemeData theme, AppState state) {
+    return SwitchListTile(
+      secondary: const Icon(Icons.fast_forward_rounded),
+      title: Text(L.t('skipStartupPage')),
+      subtitle: Text(
+        L.t('skipStartupPageDesc'),
+        style: const TextStyle(fontSize: 11),
+      ),
+      value: HostStore.instance.skipStartup,
+      onChanged: (v) async {
+        await HostStore.instance.setSkipStartup(v);
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  /// 音量键翻页开关
+  Widget _buildVolumeKeyTile(ThemeData theme, AppState state) {
+    return SwitchListTile(
+      secondary: const Icon(Icons.volume_up_outlined),
+      title: Text(L.t('volumeKeyPage')),
+      value: state.volumeKeyPage,
+      onChanged: (v) => state.setVolumeKeyPage(v),
+    );
+  }
+
+  /// 自定义背景图：选图 → 复制到应用私有目录 → 记录路径
+  Widget _buildBackgroundTile(ThemeData theme, AppState state) {
+    final has = state.customBackground.isNotEmpty;
+    return ListTile(
+      leading: const Icon(Icons.wallpaper_rounded),
+      title: Text(L.t('customBackground')),
+      subtitle: Text(
+        L.t('customBackgroundDesc'),
+        style: const TextStyle(fontSize: 11),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (has)
+            IconButton(
+              tooltip: L.t('clearBackground'),
+              icon: const Icon(Icons.close_rounded, size: 18),
+              onPressed: () => state.setCustomBackground(''),
+            ),
+          const Icon(Icons.chevron_right, size: 18),
+        ],
+      ),
+      onTap: () async {
+        final path = await FilePickerChannel.pickFile();
+        if (path == null || !mounted) return;
+        // 复制到应用私有目录：原图可能被用户在相册里删掉/移动
+        try {
+          final base = await getApplicationDocumentsDirectory();
+          final dir = Directory('${base.path}/JMoe/bg');
+          if (!dir.existsSync()) dir.createSync(recursive: true);
+          final ext = path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+          final target = '${dir.path}/custom_bg.$ext';
+          await File(path).copy(target);
+          await state.setCustomBackground(target);
+        } catch (_) {}
+      },
     );
   }
 
@@ -484,11 +557,26 @@ class _SettingsPageState extends State<SettingsPage>
 
   /// 统一「语言」入口 → 语言管理页（界面语言 + 内容语言）。
   Widget _buildLanguageEntry(ThemeData theme, AppState state) {
+    // 副标题只显示该语言的**自称**（简体中文 / 繁體中文 / English）。
+    // 之前是 `zh-Hans · CN` 这种内部代码，用户根本看不懂。
+    final uiName = switch (state.uiLang) {
+      'en' => 'English',
+      'zh-Hant' => '繁體中文',
+      _ => '简体中文',
+    };
+    final contentName = switch (state.lang) {
+      'CN' => '简体中文',
+      'TW' => '繁體中文',
+      'JP' => '日本語',
+      'EN' => 'English',
+      _ => state.lang,
+    };
     return ListTile(
       leading: const Icon(Icons.translate),
       title: Text(L.t('languageManage')),
       subtitle: Text(
-        '${L.t(state.uiLang)} · ${state.lang}',
+        // 界面语言与内容语言一致时只写一个，避免「简体中文 · 简体中文」
+        uiName == contentName ? uiName : '$uiName · $contentName',
         style: const TextStyle(fontSize: 11.5),
       ),
       trailing: const Icon(Icons.chevron_right, size: 18),
@@ -518,3 +606,5 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 }
+
+

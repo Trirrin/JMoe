@@ -118,6 +118,20 @@ class ReadingStats {
   int get todaySeconds =>
       byType.values.fold<int>(0, (a, b) => a + b.todaySeconds);
 
+  /// 三个板块合并后的「按天秒数」，供日历使用。
+  ///
+  /// 日历要按天显示阅读活跃度，而 `daily` 存在各板块内部，
+  /// 所以这里做一次聚合（同一天多板块相加）。
+  Map<String, int> get mergedDaily {
+    final out = <String, int>{};
+    for (final t in byType.values) {
+      t.daily.forEach((k, v) {
+        out[k] = (out[k] ?? 0) + v;
+      });
+    }
+    return out;
+  }
+
   /// 汇总的 7 日曲线（三板块相加）
   List<({String day, int seconds})> get last7Days {
     final out = <({String day, int seconds})>[];

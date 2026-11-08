@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+
+import 'app_state.dart';
 import 'package:pointycastle/export.dart';
 import 'l10n.dart';
 
@@ -400,11 +402,78 @@ class JmApi {
 
   int _now() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
+  /// 换线路重试专用：把 GET 打到**指定** host 上（不改全局 baseUrl）。
+  ///
+  /// 用于「某个接口在某条线路上稳定 500」的场景 —— 实测 `novelchapters`
+  /// 在 cdnbtd / cdnutc / cdngwc.net 上稳定 500，而 cdngwc.club /
+  /// cdnutc.me 正常返回。这种情况换线重试就能出结果，不该让用户看到
+  /// 「本章内容需要登录或购买后查看」。
+  Future<Map<String, dynamic>?> getOnHost(
+    String host,
+    String path, [
+    Map<String, dynamic>? params,
+  ]) async {
+    if (AppState.instance.offlineMode) return null;
+    final ts = _now();
+    final merged = <String, dynamic>{...?params};
+    merged.putIfAbsent('lang', () => lang);
+    final clean = <String, dynamic>{};
+    merged.forEach((k, v) {
+      if (v == null) return;
+      if (v is String && v.isEmpty) return;
+      clean[k] = v;
+    });
+    try {
+      final res = await _dio.get<dynamic>(
+        'https://$host/$path',
+        queryParameters: clean,
+        options: Options(
+          headers: _headers(ts),
+          responseType: ResponseType.json,
+          // 单线路探测不必等太久
+          receiveTimeout: const Duration(seconds: 15),
+          connectTimeout: const Duration(seconds: 10),
+        ),
+      );
+      if (res.statusCode != null && res.statusCode! >= 500) {
+        print('[JMOE] $host/$path -> HTTP ${res.statusCode}');
+        return null;
+      }
+      final map = JmProtocol.decodeResponse(res.data, ts, path);
+      if (map['code'] == 200) return map;
+      return null;
+    } catch (e) {
+      print('[JMOE] $host/$path EXC: $e');
+      return null;
+    }
+  }
+
+  /// 依次在所有已知线路上重试同一接口，返回第一个成功的结果。
+  Future<Map<String, dynamic>?> getWithHostRotation(
+    String path, [
+    Map<String, dynamic>? params,
+  ]) async {
+    final current = Uri.tryParse(baseUrl)?.host;
+    for (final h in hosts) {
+      if (h.isEmpty || h[0] == current) continue;
+      final r = await getOnHost(h[0], path, params);
+      if (r != null) {
+        print('[JMOE] $path recovered on ${h[0]}');
+        return r;
+      }
+    }
+    return null;
+  }
+
   /// GET 请求（自动解密）。失败时按线路表轮换重试一次。
   Future<Map<String, dynamic>> get(
     String path, [
     Map<String, dynamic>? params,
   ]) async {
+    // 离线模式：不发起任何网络请求
+    if (AppState.instance.offlineMode) {
+      return {'code': -1, 'errorMsg': 'offline'};
+    }
     final merged = <String, dynamic>{...?params};
     merged.putIfAbsent('lang', () => lang);
     final clean = <String, dynamic>{};
@@ -459,10 +528,76 @@ class JmApi {
   }
 
   /// POST（multipart/form-data），与官方客户端一致。
+  /// 以 **application/x-www-form-urlencoded** 提交。
+  ///
+  /// 与 [post]（multipart）的区别很关键：实测 `like` 接口只接受
+  /// urlencoded 表单，用 multipart 提交会被判成「点讚失败」。
+  /// 所以点赞这类接口必须走这里。
+  Future<Map<String, dynamic>> postForm(
+    String path, [
+    Map<String, dynamic>? params,
+  ]) async {
+    if (AppState.instance.offlineMode) {
+      return {'code': -1, 'errorMsg': 'offline'};
+    }
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final ts = _now();
+      try {
+        final body = <String, String>{};
+        (params ?? {}).forEach((k, v) {
+          if (v == null) return;
+          body[k] = v.toString();
+        });
+        final res = await _dio.post<dynamic>(
+          '${baseUrl}$path',
+          data: body,
+          options: Options(
+            headers: {
+              ..._headers(ts),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            responseType: ResponseType.json,
+            contentType: Headers.formUrlEncodedContentType,
+          ),
+        );
+        final map = JmProtocol.decodeResponse(res.data, ts, path);
+        final code = map['code'];
+        if (code == 200 || res.statusCode == 400 || res.statusCode == 401) {
+          return map;
+        }
+        if (attempt < 3) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 300 * (1 << attempt)),
+          );
+          await _rotateHost();
+          continue;
+        }
+        return map;
+      } catch (e) {
+        lastError = e;
+        if (attempt < 3) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 300 * (1 << attempt)),
+          );
+          await _rotateHost();
+        }
+      }
+    }
+    return {
+      'code': -1,
+      'errorMsg': '$lastError',
+    };
+  }
+
   Future<Map<String, dynamic>> post(
     String path, [
     Map<String, dynamic>? params,
   ]) async {
+    // 离线模式：不发起任何网络请求
+    if (AppState.instance.offlineMode) {
+      return {'code': -1, 'errorMsg': 'offline'};
+    }
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
       final ts = _now();
@@ -522,6 +657,8 @@ class JmApi {
 
   /// 原始字节（图片、下载用）。
   Future<Uint8List?> fetchBytes(String url, {String? referer}) async {
+    // 离线模式：不发起任何网络请求（已缓存的图片走磁盘解密，不经过这里）
+    if (AppState.instance.offlineMode) return null;
     try {
       final res = await _dio.get<List<int>>(
         url,
@@ -536,7 +673,8 @@ class JmApi {
       final data = res.data;
       if (data == null) return null;
       return Uint8List.fromList(data);
-    } catch (_) {
+    } catch (e) {
+      print('[JMOE] fetchBytes EXC url=$url err=$e');
       return null;
     }
   }

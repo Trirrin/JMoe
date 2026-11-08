@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import '../core/l10n.dart';
 import '../core/reader_settings.dart';
 
-/// 小说阅读器的菜单覆盖层（顶栏 + 底部工具栏）。
+/// 小说阅读器的菜单覆盖层。
 ///
-/// 从原 `novel_pages.dart`（2000+ 行）中抽出，职责单一：
-/// 只负责渲染菜单与控制动画，不处理业务逻辑。
-class NovelMenuOverlay extends StatelessWidget {
+/// 动画约定：
+/// - 顶栏从上边缘滑入（负向）
+/// - 底部工具栏与进度条从下边缘滑入（正向）
+/// - 收起因均走反向，且带淡入淡出
+class NovelMenuOverlay extends StatefulWidget {
   const NovelMenuOverlay({
     super.key,
     required this.animation,
@@ -25,6 +27,8 @@ class NovelMenuOverlay extends StatelessWidget {
     required this.onBookmark,
     required this.onTts,
     required this.ttsOn,
+    required this.onAutoScroll,
+    required this.autoScrolling,
     required this.progress,
     required this.onProgressChanged,
   });
@@ -44,8 +48,41 @@ class NovelMenuOverlay extends StatelessWidget {
   final VoidCallback onBookmark;
   final VoidCallback onTts;
   final bool ttsOn;
+
+  final VoidCallback onAutoScroll;
+  final bool autoScrolling;
   final double progress;
   final ValueChanged<double> onProgressChanged;
+
+  @override
+  State<NovelMenuOverlay> createState() => _NovelMenuOverlayState();
+}
+
+class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
+  /// 拖动中的临时值（null = 未在拖动，用外部 progress）
+  double? _dragValue;
+
+  double get progress => _dragValue ?? widget.progress;
+
+  // 转发到 widget，保持下方代码可读
+  Animation<double> get animation => widget.animation;
+  ReaderTheme get theme => widget.theme;
+  String get title => widget.title;
+  int get chapterIndex => widget.chapterIndex;
+  int get chapterCount => widget.chapterCount;
+  String get pageLabel => widget.pageLabel;
+  VoidCallback get onClose => widget.onClose;
+  VoidCallback get onBack => widget.onBack;
+  VoidCallback get onCatalog => widget.onCatalog;
+  VoidCallback get onSearch => widget.onSearch;
+  VoidCallback get onTypography => widget.onTypography;
+  VoidCallback get onTheme => widget.onTheme;
+  VoidCallback get onBookmark => widget.onBookmark;
+  VoidCallback get onTts => widget.onTts;
+  bool get ttsOn => widget.ttsOn;
+  VoidCallback get onAutoScroll => widget.onAutoScroll;
+  bool get autoScrolling => widget.autoScrolling;
+  ValueChanged<double> get onProgressChanged => widget.onProgressChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -53,42 +90,64 @@ class NovelMenuOverlay extends StatelessWidget {
       onTap: onClose,
       child: Container(
         color: Colors.black.withValues(alpha: 0.25),
-        child: AnimatedBuilder(
-          animation: animation,
-          builder: (context, child) {
-            final t = Curves.easeOutCubic.transform(animation.value);
-            return Opacity(
-              opacity: t,
-              child: Transform.translate(
-                offset: Offset(0, 24 * (1 - t)),
-                child: child,
-              ),
-            );
-          },
-          child: SafeArea(
-            child: Column(
-              children: [
-                _topBar(context),
-                const Spacer(),
-                _progressBar(context),
-                _toolbar(context),
-              ],
+        child: Column(
+          children: [
+            // 顶栏：从上方飞入
+            _slideIn(
+              from: -1,
+              child: _topBar(context),
             ),
-          ),
+            const Spacer(),
+            // 底部：进度条 + 工具栏合成一块（共用背景，不再割裂）
+            _slideIn(
+              from: 1,
+              child: _bottomPanel(context),
+            ),
+          ],
         ),
       ),
     );
   }
 
+  /// 方向化滑入 + 淡入。from = -1 上方，1 下方。
+  Widget _slideIn({required double from, required Widget child}) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, c) {
+        final t = Curves.easeOutCubic.transform(animation.value);
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, from * 60 * (1 - t)),
+            child: c,
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+
+  /// 面板底色：比阅读背景稍作区分，避免深色下融为一体。
+  Color get _panelColor {
+    final isDark = theme.bg.computeLuminance() < 0.5;
+    return isDark
+        ? Color.alphaBlend(Colors.white.withValues(alpha: 0.08), theme.bg)
+        : Color.alphaBlend(Colors.black.withValues(alpha: 0.04), theme.bg);
+  }
+
+  /// 分隔线颜色
+  Color get _dividerColor => theme.subtle.withValues(alpha: 0.28);
+
   Widget _topBar(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: theme.bg.withValues(alpha: 0.96),
+        color: _panelColor,
+        border: Border(bottom: BorderSide(color: _dividerColor)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 10,
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 12,
             offset: const Offset(0, 2),
           ),
         ],
@@ -126,43 +185,72 @@ class NovelMenuOverlay extends StatelessWidget {
     );
   }
 
-  Widget _progressBar(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: SliderTheme(
-        data: SliderTheme.of(context).copyWith(
-          trackHeight: 2,
-          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-          overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-        ),
-        child: Slider(
-          value: progress.clamp(0.0, 1.0),
-          onChanged: onProgressChanged,
-        ),
+
+
+
+  /// 进度条 + 工具栏：同一块面板，视觉上连续。
+  Widget _bottomPanel(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    return Container(
+      decoration: BoxDecoration(
+        color: _panelColor,
+        border: Border(top: BorderSide(color: _dividerColor)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 14,
+            offset: const Offset(0, -3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 进度条（紧贴工具栏上方，无间隙）
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 2,
+              activeTrackColor: theme.fg,
+              inactiveTrackColor: theme.subtle.withValues(alpha: 0.3),
+              thumbColor: theme.fg,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
+              child: Slider(
+                value: progress.clamp(0.0, 1.0),
+                // 拖动中只更新本地值，避免频繁 setState 造成卡顿
+                onChanged: (v) => setState(() => _dragValue = v),
+                onChangeEnd: (v) {
+                  setState(() => _dragValue = null);
+                  onProgressChanged(v);
+                },
+              ),
+            ),
+          ),
+          _toolbarRow(bottomInset),
+        ],
       ),
     );
   }
 
-  Widget _toolbar(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: theme.bg.withValues(alpha: 0.96),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
+  Widget _toolbarRow(double bottomInset) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(4, 2, 4, 6 + bottomInset),
       child: Row(
         children: [
           _btn(Icons.list_rounded, L.t('catalog'), onCatalog),
           _btn(Icons.search_rounded, L.t('searchInBook'), onSearch),
           _btn(Icons.text_fields_rounded, L.t('typography'), onTypography),
           _btn(Icons.palette_outlined, L.t('theme'), onTheme),
-          _btn(Icons.bookmark_add_outlined, L.t('addBookmark'), onBookmark),
+          _btn(
+            autoScrolling
+                ? Icons.pause_circle_outline
+                : Icons.play_circle_outline,
+            autoScrolling ? L.t('stopAutoScroll') : L.t('autoScroll'),
+            onAutoScroll,
+          ),
           _btn(
             ttsOn
                 ? Icons.stop_circle_outlined
@@ -181,16 +269,18 @@ class NovelMenuOverlay extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 7),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 21, color: theme.fg),
-              const SizedBox(height: 4),
+              Icon(icon, size: 20, color: theme.fg),
+              const SizedBox(height: 3),
               Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 9.5, color: theme.subtle),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 9, color: theme.subtle),
               ),
             ],
           ),

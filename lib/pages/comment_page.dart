@@ -279,14 +279,8 @@ class _CommentPageState extends State<CommentPage> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
+        // 刷新按钮已移除：本页支持下拉刷新，再放一个按钮是重复入口
         title: Text(widget.title),
-        actions: [
-          IconButton(
-            tooltip: L.t('refresh'),
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => _load(reset: true),
-          ),
-        ],
       ),
       body: Stack(
         children: [

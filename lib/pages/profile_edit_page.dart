@@ -4,11 +4,51 @@ import '../core/app_state.dart';
 import '../core/jm_service.dart';
 import '../core/l10n.dart';
 
+/// 性别选择块：自带底色的胶囊。
+///
+/// 主题里 `chipTheme.side = BorderSide.none`，未选中的 ChoiceChip 在
+/// 浅色背景上几乎不可见（用户反馈「性别选项控件没有背景」）。
+/// 这里自绘一个始终有底色的块，选中时换成主色。
+class _GenderChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _GenderChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: selected ? scheme.primary : scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 /// 账号资料编辑页。
 ///
 /// 只开放低风险字段：昵称 / 姓名 / 性别 / 生日 / 城市 / 国家 /
 /// 职业 / 公司 / 学校 / 网站 / 简介。
-/// **刻意不支持修改密码与邮箱**——凭据变更应在官方站点完成。
+/// **刻意不支持修改邮箱**——凭据变更应在官方站点完成。
 class ProfileEditPage extends StatefulWidget {
   const ProfileEditPage({super.key});
 
@@ -26,11 +66,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   String? _gender;
   String _uid = '';
 
-  /// 修改密码（留空表示不改）
-  final _newPass = TextEditingController();
-  final _newPass2 = TextEditingController();
-  bool _obscure1 = true;
-  bool _obscure2 = true;
+  /// 修改密码已移到独立页面（change_password_page.dart），
+  /// 本页不再持有密码字段。
   String? _email;
 
   /// 可编辑的文本字段：(key, 多行?)
@@ -62,8 +99,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     for (final c in _form.values) {
       c.dispose();
     }
-    _newPass.dispose();
-    _newPass2.dispose();
     super.dispose();
   }
 
@@ -83,28 +118,40 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     }
     final d = await _service.fetchProfile(uid);
     if (!mounted) return;
+    // `useredit/{uid}` 在部分账号上会返回**全空字段**（实测 nickName/
+    // firstName 等全是 ""，但登录响应里 member 明明有值）。
+    // 这时用本地会话的 member 兜底，否则用户看到「编辑资料一片空白」，
+    // 会以为资料丢了。
+    final member = AppState.instance.member ?? const <String, dynamic>{};
+    Map<String, dynamic> merged;
     if (d == null) {
-      setState(() {
-        _loading = false;
-        _error = L.t('loadFailed');
-      });
-      return;
+      merged = Map<String, dynamic>.from(member);
+    } else {
+      merged = Map<String, dynamic>.from(d);
+      for (final f in _fields) {
+        final v = '${merged[f.key] ?? ''}'.trim();
+        if (v.isEmpty || v == 'null') {
+          final local = '${member[f.key] ?? ''}'.trim();
+          if (local.isNotEmpty && local != 'null') merged[f.key] = local;
+        }
+      }
+      // gender 同理
+      final g = '${merged['gender'] ?? ''}'.trim();
+      if (g.isEmpty || g == 'null') {
+        final lg = '${member['gender'] ?? ''}'.trim();
+        if (lg.isNotEmpty && lg != 'null') merged['gender'] = lg;
+      }
     }
     setState(() {
       for (final f in _fields) {
-        final v = '${d[f.key] ?? ''}';
-        _form[f.key]!.text = (v == 'null') ? '' : v;
+        final v = '${merged[f.key] ?? ''}';
+        _form[f.key]!.text = (v == 'null' || v == '0000-00-00') ? '' : v;
       }
-      _gender = d['gender'] == null ? null : '${d['gender']}';
+      _gender = merged['gender'] == null ? null : '${merged['gender']}';
+      if (_gender != null && _gender!.isEmpty) _gender = null;
       _email = AppState.instance.member?['email']?.toString();
       _loading = false;
     });
-  }
-
-  void _snack(String s) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(s), behavior: SnackBarBehavior.floating),
-    );
   }
 
   Future<void> _save() async {
@@ -116,28 +163,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     });
     if (_gender != null) fields['gender'] = _gender;
 
-    // 校验两次密码一致
-    final p1 = _newPass.text;
-    final p2 = _newPass2.text;
-    if (p1.isNotEmpty || p2.isNotEmpty) {
-      if (p1.length < 6) {
-        setState(() => _saving = false);
-        _snack(L.t('passwordTooShort'));
-        return;
-      }
-      if (p1 != p2) {
-        setState(() => _saving = false);
-        _snack(L.t('passwordMismatch'));
-        return;
-      }
-    }
-
-    final r = await _service.saveProfile(
-      _uid,
-      fields,
-      newPassword: p1.isEmpty ? null : p1,
-      newPasswordConfirm: p2.isEmpty ? null : p2,
-    );
+    // 密码不在这里改（已拆到独立的「修改密码」页）
+    final r = await _service.saveProfile(_uid, fields);
     if (!mounted) return;
     setState(() => _saving = false);
 
@@ -242,17 +269,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                       spacing: 8,
                       children: [
                         for (final g in ['Male', 'Female', 'Other'])
-                          ChoiceChip(
-                            label: Text(
-                              g == 'Male'
-                                  ? L.t('genderMale')
-                                  : (g == 'Female'
-                                      ? L.t('genderFemale')
-                                      : L.t('genderOther')),
-                              style: const TextStyle(fontSize: 12),
-                            ),
+                          _GenderChip(
+                            label: g == 'Male'
+                                ? L.t('genderMale')
+                                : (g == 'Female'
+                                    ? L.t('genderFemale')
+                                    : L.t('genderOther')),
                             selected: _gender == g,
-                            onSelected: (_) => setState(() => _gender = g),
+                            onTap: () => setState(() => _gender = g),
                           ),
                       ],
                     ),
@@ -271,53 +295,9 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                       const SizedBox(height: 12),
                     ],
                     const SizedBox(height: 18),
-                    Text(
-                      L.t('changePassword'),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _newPass,
-                      obscureText: _obscure1,
-                      decoration: InputDecoration(
-                        labelText: L.t('newPassword'),
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscure1
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                            size: 18,
-                          ),
-                          onPressed: () =>
-                              setState(() => _obscure1 = !_obscure1),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _newPass2,
-                      obscureText: _obscure2,
-                      decoration: InputDecoration(
-                        labelText: L.t('confirmNewPassword'),
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscure2
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                            size: 18,
-                          ),
-                          onPressed: () =>
-                              setState(() => _obscure2 = !_obscure2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
+                    // 修改密码已拆成独立页面（与「编辑资料」同级入口），
+                    // 不再埋在资料表单底部 —— 混在一起既容易误填，
+                    // 也让人以为「保存资料」会顺带改密码。
                     Text(
                       L.t('emailAddress'),
                       style: theme.textTheme.titleSmall?.copyWith(

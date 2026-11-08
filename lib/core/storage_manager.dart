@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import 'cache_manager.dart';
+import 'downloader.dart';
 import 'image_cache.dart';
 import 'novel_cache.dart';
 import 'video_cache.dart';
@@ -33,12 +34,16 @@ class StorageManager {
     final chapters = await _chapterBytes();
     final novel = await NovelCacheManager.instance.usedBytes();
     final video = await VideoCacheManager.instance.usedBytes();
+    // 「我的下载」的内容（用户主动下载的整章文件），
+    // 与「缓存」是两件事：缓存可被 LRU 清掉，下载是用户资产。
+    final downloads = ChapterDownloader.totalDownloadBytes();
     final base = await getApplicationSupportDirectory();
     final config = await _dirBytes(Directory('${base.path}/config'));
 
     return [
       StorageSlice(key: 'storageImages', bytes: img),
       StorageSlice(key: 'storageChapters', bytes: chapters),
+      StorageSlice(key: 'storageDownloads', bytes: downloads),
       StorageSlice(key: 'storageNovels', bytes: novel),
       StorageSlice(key: 'storageVideos', bytes: video),
       StorageSlice(
@@ -86,6 +91,12 @@ class StorageManager {
       case 'storageChapters':
         await CacheManager.instance.clearAll();
         break;
+      case 'storageDownloads':
+        // 下载是用户资产：清理会把磁盘文件一起删掉，调用方需二次确认
+        for (final t in ChapterDownloader.allTasks.toList()) {
+          await ChapterDownloader.deleteBy(t.sourceId, t.chapterId);
+        }
+        break;
       case 'storageNovels':
         await NovelCacheManager.instance.clearAll();
         break;
@@ -99,6 +110,7 @@ class StorageManager {
   Future<void> clearAll() async {
     await clear('storageImages');
     await clear('storageChapters');
+    await clear('storageDownloads');
     await clear('storageNovels');
     await clear('storageVideos');
   }

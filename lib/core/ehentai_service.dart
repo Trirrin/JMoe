@@ -6,6 +6,7 @@ import 'package:html/parser.dart' as html_parser;
 
 import 'models.dart';
 import 'app_log.dart';
+import 'app_state.dart';
 import 'l10n.dart';
 
 /// e-hentai.org 数据源适配。
@@ -17,9 +18,16 @@ class EHentaiService {
   static final EHentaiService instance = EHentaiService._();
 
   /// 主域名 + 备用镜像（部分网络下主域不可达）
+  /// 可用域名列表（主域 + 社区常用反代）。
+  ///
+  /// 注意：EH 在部分地区不可直连，必须靠反代。
+  /// 这里放多个候选，首次请求时自动挑选可用的那个。
   static const List<String> _mirrorList = [
     'https://e-hentai.org',
-    'https://e-hentai.exhentai.org',
+    'https://e-hentai.org',      // 占位，去重后无影响
+    'https://upup.li',
+    'https://exhentai.org',
+    'https://e-hentai.exh-entai.org',
   ];
 
   /// 上次成功的域名，后续优先使用
@@ -54,6 +62,9 @@ class EHentaiService {
   }
 
   /// 带镜像回退的抓取：当前域名失败后依次尝试其他镜像。
+  /// 最近一次抓取失败的原因（供 UI 展示）
+  String? lastError;
+
   Future<String?> _getHtmlWithFallback(String url) async {
     // 先试当前域名
     final first = await _getHtml(url);
@@ -67,13 +78,21 @@ class EHentaiService {
       final r = await _getHtml(swapped);
       if (r != null && r.isNotEmpty) {
         _base = m; // 记住可用域名
+        lastError = null;
         return r;
       }
     }
+    // 全部失败：记录原因，供界面提示
+    lastError = 'unreachable';
     return null;
   }
 
   Future<String?> _getHtml(String url) async {
+    // 离线模式：不发起任何网络请求
+    if (AppState.instance.offlineMode) {
+      lastError = 'offline';
+      return null;
+    }
     try {
       final res = await _dio.get<String>(
         url,
@@ -118,12 +137,18 @@ class EHentaiService {
 
   /// 抓取图片原始字节（绕过防盗链）。
   Future<Uint8List?> fetchBytes(String url, {String? referer}) async {
+    if (AppState.instance.offlineMode) return null;
     try {
       final res = await _dio.get<List<int>>(
         url,
         options: Options(
           responseType: ResponseType.bytes,
           headers: {
+            // EH 图片服务器会校验 UA，缺失会直接拒绝（403/空响应）
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) '
+                    'Chrome/120.0.0.0 Safari/537.36',
             if (cookie != null && cookie!.isNotEmpty) 'Cookie': cookie!,
             'Referer': referer ?? base,
             'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
@@ -146,10 +171,18 @@ class EHentaiService {
   }
 
   /// 首页 / 搜索结果 / 分类列表统一解析。
+  ///
+  /// 抓取失败时**抛异常**而不是返回空列表 —— 空列表在 UI 上等价于
+  /// 「这个站没有任何内容」，会显示成一片空白（EH 白屏的观感）。
+  /// 抛异常才能让上层显示「加载失败 + 重试」。
   Future<EHPage> fetchListing(String url) async {
     final html = await _getHtmlWithFallback(url);
     if (html == null) {
-      return const EHPage(items: [], nextUrl: null, total: 0);
+      throw Exception(
+        AppState.instance.offlineMode
+            ? L.t('offline')
+            : (lastError ?? L.t('networkError')),
+      );
     }
     final doc = html_parser.parse(html);
     final items = <EHItem>[];

@@ -16,18 +16,22 @@ class LanguagePage extends StatefulWidget {
 }
 
 class _LanguagePageState extends State<LanguagePage> {
-  /// 界面语言（本地文案）
+  /// 界面语言（本地文案）。
+  ///
+  /// 第三项是**副标题**：必须让用户看出是哪种语言本身，
+  /// 所以统一用该语言的**自称**（简体中文 / 繁體中文 / English），
+  /// 不要写 "Simplified Chinese" 这种英文解释，更不要显示 `zh-Hans`。
   static List<(String, String, String)> get _uiOptions => [
-    ('zh-Hans', L.t('langZhHans'), 'Simplified Chinese'),
-    ('zh-Hant', L.t('langZhHant'), 'Traditional Chinese'),
+    ('zh-Hans', L.t('langZhHans'), '简体中文'),
+    ('zh-Hant', L.t('langZhHant'), '繁體中文'),
     ('en', 'English', 'English'),
   ];
 
   /// 内容语言（服务端返回内容的字形）
   static List<(String, String, String)> get _contentOptions => [
-    ('CN', L.t('langZhHans'), 'Simplified Chinese'),
-    ('TW', L.t('langZhHant'), 'Traditional Chinese'),
-    ('JP', L.t('langJa'), 'Japanese'),
+    ('CN', L.t('langZhHans'), '简体中文'),
+    ('TW', L.t('langZhHant'), '繁體中文'),
+    ('JP', L.t('langJa'), '日本語'),
     ('EN', 'English', 'English'),
   ];
 

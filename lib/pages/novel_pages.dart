@@ -14,9 +14,12 @@ import '../core/reader_paginator.dart';
 import '../core/reader_settings.dart';
 import '../core/reader_store.dart';
 import '../core/reading_stats.dart';
+import '../widgets/app_toast.dart';
+import '../widgets/common_widgets.dart';
 import '../widgets/novel_catalog_overlay.dart';
 import '../widgets/novel_theme_sheet.dart';
 import '../widgets/novel_text_view.dart';
+import '../widgets/novel_tts_sheet.dart';
 import '../widgets/novel_typography_sheet.dart';
 import '../widgets/novel_menu_overlay.dart';
 
@@ -42,15 +45,43 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
   final _store = ReaderStore.instance;
   Map<String, dynamic>? _detail;
   List<Map<String, dynamic>> _chapters = [];
-  bool _loading = true;
   bool _descExpanded = false;
   int _resumeIndex = 0;
   bool _resumeLoaded = false;
 
+  /// 本地收藏状态
+  bool _novelFav = false;
+
   @override
   void initState() {
     super.initState();
+    _novelFav = AppState.instance.isLocalFavorite(widget.nid);
     _load();
+  }
+
+  /// 收藏 / 取消收藏（本地优先，百分百成功）。
+  Future<void> _toggleNovelFav() async {
+    final target = !_novelFav;
+    setState(() => _novelFav = target);
+    await AppState.instance.setLocalFavorite(
+      {
+        'id': widget.nid,
+        'name': _displayTitle,
+        'author': '${_detail?['author'] ?? ''}',
+        'cover': _coverUrl ?? '',
+        'source': 'jm',
+        'type': 'novel',
+      },
+      target,
+    );
+    if (!mounted) return;
+    // 与漫画详情页统一：自绘 Toast（有入场/出场动画）
+    AppToast.show(
+      context,
+      target ? L.t('favorited') : L.t('unfavorited'),
+      icon: target ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+      accent: target ? const Color(0xFFFF6B81) : null,
+    );
   }
 
   Future<void> _load() async {
@@ -68,7 +99,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
       _chapters = chapters;
       _resumeIndex = resume;
       _resumeLoaded = p != null;
-      _loading = false;
     });
   }
 
@@ -106,68 +136,112 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
     final views = '${_detail?['total_views'] ?? ''}';
 
     return Scaffold(
-      appBar: AppBar(title: Text(_displayTitle, maxLines: 1)),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+      appBar: AppBar(
+        title: Text(_displayTitle, maxLines: 1),
+        actions: [
+          IconButton(
+            tooltip: L.t('favorite'),
+            icon: Icon(
+              _novelFav ? Icons.favorite : Icons.favorite_border,
+              color: _novelFav ? theme.colorScheme.error : null,
+            ),
+            onPressed: _toggleNovelFav,
+          ),
+        ],
+      ),
+      body: ListView(
+        // 不再让整个 body 等接口：首帧就用**列表页带来的**封面/标题渲染，
+        // 这样 Hero 转场有落点，封面能一路飞进详情页。
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+        children: [
+          // 头部：左侧封面 + 右侧信息。
+          //
+          // # 为什么用固定高度而不是 IntrinsicHeight
+          //
+          // 之前用 `IntrinsicHeight + spaceBetween`：右侧标题行数变化
+          // （加载前只有列表页带来的短标题，加载完变成完整长标题 → 从 1 行
+          // 变 2 行）会撑高整个 Row，于是封面被往下推、Hero 落地后又「上移」，
+          // 用户看到明显的跳变。
+          //
+          // 现在整块高度**钉死**为封面高度（139），内部一律不溢出：
+          //  * 右侧标题固定最多 2 行
+          //  * 作者 / 播放量单行省略
+          //  * 按钮贴底
+          // 无论加载前后，封面位置都完全不动。
+          SizedBox(
+            height: 139,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
+                Hero(
+                  // 与列表项封面的 tag 对应
+                  tag: 'novel_${widget.nid}',
+                  // 飞行层用与详情页**完全相同**的圆角（10），
+                  // 这样落地瞬间不会从 6 跳到 10 而产生「到位后才跳变」。
+                  flightShuttleBuilder: (ctx, anim, dir, from, to) {
+                    return ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      child: SizedBox(
-                        width: 104,
-                        height: 139,
-                        child: _coverUrl == null
-                            ? Container(
-                                color: theme.colorScheme.surfaceContainerHighest,
-                                child: const Icon(Icons.menu_book_rounded,
-                                    size: 32),
-                              )
-                            : Image.network(
-                                _coverUrl!,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => Container(
-                                  color:
-                                      theme.colorScheme.surfaceContainerHighest,
-                                  child: const Icon(Icons.menu_book_rounded,
-                                      size: 32),
-                                ),
+                      child: CoverImage(url: _coverUrl),
+                    );
+                  },
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 104,
+                      height: 139,
+                      child: _coverUrl == null
+                          ? Container(
+                              color: theme.colorScheme.surfaceContainerHighest,
+                              child: const Icon(
+                                Icons.menu_book_rounded,
+                                size: 32,
                               ),
-                      ),
+                            )
+                          : CoverImage(url: _coverUrl),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    // 标题组在上、按钮贴底：两者之间用 Spacer 吃掉剩余空间，
+                    // 整块高度由外层 SizedBox 钉死，不会被内容撑开。
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
+                          // 标题最多两行：多了就省略，不去挤按钮
                           Text(
                             _displayTitle,
-                            maxLines: 3,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
+                            style: theme.textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.w700,
-                              height: 1.35,
+                              height: 1.3,
                             ),
                           ),
                           if (author.isNotEmpty) ...[
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 4),
                             Row(
                               children: [
-                                Icon(Icons.person_outline_rounded,
-                                    size: 14,
-                                    color: theme.colorScheme.onSurfaceVariant),
-                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.person_outline_rounded,
+                                  size: 12,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 3),
                                 Expanded(
                                   child: Text(
                                     author,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      fontSize: 12,
-                                      color: theme.colorScheme.onSurfaceVariant,
+                                      fontSize: 11,
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ),
@@ -175,92 +249,140 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                             ),
                           ],
                           if (views.isNotEmpty) ...[
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 2),
                             Row(
                               children: [
-                                Icon(Icons.visibility_outlined,
-                                    size: 14,
-                                    color: theme.colorScheme.onSurfaceVariant),
-                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.visibility_outlined,
+                                  size: 12,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 3),
                                 Text(
                                   views,
                                   style: TextStyle(
-                                    fontSize: 12,
-                                    color: theme.colorScheme.onSurfaceVariant,
+                                    fontSize: 11,
+                                    color:
+                                        theme.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
                               ],
                             ),
                           ],
-                          const SizedBox(height: 10),
-                          FilledButton.icon(
-                            onPressed: _chapters.isEmpty
-                                ? null
-                                : () => _open(_resumeIndex),
-                            icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                            label: Text(_resumeLoaded && _resumeIndex > 0
-                                ? L.t('continueReading')
-                                : L.t('startReading')),
-                            style: FilledButton.styleFrom(
-                              minimumSize: const Size(0, 38),
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 16),
-                              textStyle: const TextStyle(fontSize: 13),
-                            ),
-                          ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                if (tags.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: tags
-                        .map(
-                          (t) => Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 9, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(t, style: const TextStyle(fontSize: 11)),
+                      // 吃掉标题组与按钮之间的剩余空间，
+                      // 让按钮贴住封面底沿（整块高度已被钉死，不会溢出）
+                      const Spacer(),
+                      // 按钮：与封面底边对齐
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _chapters.isEmpty
+                              ? null
+                              : () => _open(_resumeIndex),
+                          icon: const Icon(Icons.play_arrow_rounded, size: 17),
+                          label: Text(
+                            _resumeLoaded && _resumeIndex > 0
+                                ? L.t('continueReading')
+                                : L.t('startReading'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        )
-                        .toList(),
-                  ),
-                ],
-                if (desc.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    desc,
-                    maxLines: _descExpanded ? null : 4,
-                    overflow: _descExpanded ? null : TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.7,
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.85),
-                    ),
-                  ),
-                  if (desc.length > 90)
-                    GestureDetector(
-                      onTap: () =>
-                          setState(() => _descExpanded = !_descExpanded),
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          _descExpanded ? L.t('collapse') : L.t('expandAll'),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.primary,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 34),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            textStyle: const TextStyle(fontSize: 12.5),
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // ---- 标签 / 简介：未加载时用灰块占位 ----
+          //
+          // 之前这里是「什么都不画」，等接口回来才突然插入整段简介 +
+          // 标签 + 章节列表，把下面的内容整体推下去（用户看到「跳」）。
+          // 现在先用灰色占位撑住同样的高度，数据到了原地替换。
+          if (_detail == null) ...[
+            const SizedBox(height: 14),
+            // 标签占位（两枚灰胶囊）
+            Row(
+              children: const [
+                ShimmerBox(width: 56, height: 22, radius: 11),
+                SizedBox(width: 6),
+                ShimmerBox(width: 72, height: 22, radius: 11),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // 简介占位（四行）
+            const ShimmerBox(height: 13, radius: 4),
+            const SizedBox(height: 7),
+            const ShimmerBox(height: 13, radius: 4),
+            const SizedBox(height: 7),
+            ShimmerBox(
+              height: 13,
+              radius: 4,
+              width: MediaQuery.of(context).size.width * 0.62,
+            ),
+          ] else ...[
+            if (tags.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: tags
+                    .map(
+                      (t) => Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          t,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+            if (desc.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                desc,
+                maxLines: _descExpanded ? null : 4,
+                overflow: _descExpanded ? null : TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.7,
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.85),
+                ),
+              ),
+              if (desc.length > 90)
+                GestureDetector(
+                  onTap: () =>
+                      setState(() => _descExpanded = !_descExpanded),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      _descExpanded ? L.t('collapse') : L.t('expandAll'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.primary,
+                      ),
                     ),
-                ],
+                  ),
+                ),
+            ],
+          ],
                 const SizedBox(height: 18),
                 Row(
                   children: [
@@ -281,6 +403,19 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                   ],
                 ),
                 const SizedBox(height: 8),
+                // 章节还在加载时的占位（不再是整页转圈，
+                // 详情内容与封面先出来，用户能立刻看到"这是什么"）
+                if (_detail == null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  ),
                 ...List.generate(_chapters.length, (i) {
                   final c = _chapters[i];
                   final active = i == _resumeIndex && _resumeLoaded;
@@ -326,12 +461,19 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
   }
 
   void _open(int index) {
+    // 带入该章的阅读进度，实现「继续阅读」
+    final p = ReaderStore.instance.progress(widget.nid);
+    final ratio = (p != null && p.chapterIndex == index) ? p.ratio : null;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => NovelReadPage(
           nid: widget.nid,
           chapters: _chapters,
           index: index,
+          initialRatio: ratio,
+          // 带上标题与封面，阅读页写历史时才不是空白
+          novelTitle: _displayTitle,
+          cover: _coverUrl,
         ),
       ),
     );
@@ -344,6 +486,15 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
 class NovelReadPage extends StatefulWidget {
   final String nid;
   final List<Map<String, dynamic>> chapters;
+
+  /// 作品标题（写阅读历史用；为空时历史里显示空名）
+  final String novelTitle;
+
+  /// 作品封面（写阅读历史用）
+  final String? cover;
+
+  /// 上次读到的章内比例（0~1）。null = 从头开始。
+  final double? initialRatio;
   final int index;
 
   const NovelReadPage({
@@ -351,6 +502,9 @@ class NovelReadPage extends StatefulWidget {
     required this.nid,
     required this.chapters,
     required this.index,
+    this.initialRatio,
+    this.novelTitle = '',
+    this.cover,
   });
 
   @override
@@ -381,6 +535,9 @@ class _NovelReadPageState extends State<NovelReadPage>
 
   /// 是否正在追加下一话（滚动到底自动续读时防止重复触发）
   bool _appendingNext = false;
+
+  /// 是否已还原过初始进度（只做一次）
+  bool _restoredOnce = false;
 
   // ---- 无缝拼接 ----
   /// 合并后的全文（当前章 + 已预取的后续章节）
@@ -426,6 +583,10 @@ class _NovelReadPageState extends State<NovelReadPage>
 
   // ---- TTS ----
   bool _ttsOn = false;
+
+  /// 自动滚动开关与计时器
+  bool _autoScrollOn = false;
+  Timer? _autoScrollTimer;
   double _ttsRate = 1.0;
   int _ttsCursor = 0;
 
@@ -458,6 +619,7 @@ class _NovelReadPageState extends State<NovelReadPage>
     _settings.removeListener(_onSettings);
     _statTimer?.cancel();
     _flushStat();
+    _autoScrollTimer?.cancel();
     _menuCtrl.dispose();
     _scroll.dispose();
     _painter?.dispose();
@@ -614,6 +776,9 @@ class _NovelReadPageState extends State<NovelReadPage>
           type: StatType.novel,
           workId: widget.nid,
         );
+        // 写入阅读历史：之前小说**从不写历史**，所以历史列表里
+        // 永远没有小说、也就谈不上「保存进度」。
+        _recordHistory(ncid, raw);
       }
       if (_scroll.hasClients) _scroll.jumpTo(0);
 
@@ -774,6 +939,31 @@ class _NovelReadPageState extends State<NovelReadPage>
       if (!mounted) return;
       if (_pageArea.width <= 0 || _pageArea.height <= 0) return;
       _rebuildPages();
+      _restoreInitialRatioOnce();
+    });
+  }
+
+  /// 首次渲染后，把阅读位置还原到上次保存的比例。
+  void _restoreInitialRatioOnce() {
+    if (_restoredOnce) return;
+    final ratio = widget.initialRatio;
+    if (ratio == null || ratio <= 0) {
+      _restoredOnce = true;
+      return;
+    }
+    _restoredOnce = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_settings.pageMode == PageMode.scroll) {
+        if (!_scroll.hasClients) return;
+        final max = _scroll.position.maxScrollExtent;
+        _scroll.jumpTo((max * ratio).clamp(0.0, max));
+      } else {
+        if (_pages.isEmpty) return;
+        final target =
+            (ratio * (_pages.length - 1)).round().clamp(0, _pages.length - 1);
+        setState(() => _page = target);
+      }
     });
   }
 
@@ -788,12 +978,9 @@ class _NovelReadPageState extends State<NovelReadPage>
     final style = _settings.textStyleFor(_theme);
     final w = _pageArea.width - _settings.marginH * 2;
     // 顶部扣掉状态栏，底部扣掉进度栏，避免正文被遮挡/离得太远
-    final topInset = MediaQuery.of(context).padding.top;
-    final bottomInset = _settings.showProgress ? 26.0 : 0.0;
-    final h = _pageArea.height -
-        _settings.marginV * 2 -
-        topInset -
-        bottomInset;
+    // SafeArea 已避开状态栏，这里只扣边距与进度栏
+    final bottomInset = _settings.showProgress ? 34.0 : 0.0;
+    final h = _pageArea.height - _settings.marginV * 2 - bottomInset;
     if (w <= 0 || h <= 0) return;
 
     final paginator = const TextPaginator();
@@ -840,6 +1027,34 @@ class _NovelReadPageState extends State<NovelReadPage>
         chapterTitle: _chapterTitle,
       );
     } catch (_) {}
+    // 同步刷新阅读历史里的页码（页号用「当前页 / 总页」近似）
+    final total = _pages.isEmpty ? 0 : _pages.length;
+    final cur = _pages.isEmpty ? 0 : (_page + 1).clamp(0, total);
+    AppState.instance.updateHistoryProgress(
+      comicId: widget.nid,
+      chapterId: _chapterKey,
+      page: cur,
+      totalPage: total,
+    );
+  }
+
+  /// 把当前小说章节写入阅读历史（kind = novel）。
+  void _recordHistory(String ncid, String text) {
+    final total = _pages.isEmpty ? 0 : _pages.length;
+    AppState.instance.recordHistory(
+      ReadHistoryEntry(
+        comicId: widget.nid,
+        chapterId: ncid,
+        comicName: widget.novelTitle,
+        chapterName: _chapterTitle,
+        cover: widget.cover,
+        source: 'jm',
+        kind: 'novel',
+        page: _pages.isEmpty ? 1 : (_page + 1).clamp(1, total),
+        totalPage: total > 0 ? total : text.length,
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
   }
 
   /// 进度文案：分页模式显示「页/总页」，滚动模式显示百分比
@@ -932,6 +1147,20 @@ class _NovelReadPageState extends State<NovelReadPage>
         excerpt: excerpt.replaceAll('\n', ' '),
         createdAt: DateTime.now().millisecondsSinceEpoch,
       ),
+    );
+    // 同时写入**全局章节书签**：这样小说书签也能在书架「书签」页
+    // 和漫画书签一起统一浏览（含页码与批注）。
+    await AppState.instance.setChapterBookmark(
+      comicId: widget.nid,
+      chapterId: _chapterKey,
+      comicName: widget.novelTitle,
+      chapterName: _chapterTitle,
+      cover: widget.cover ?? '',
+      source: 'jm',
+      on: true,
+      page: _pages.isEmpty ? 1 : (_page + 1).clamp(1, _pages.length),
+      kind: 'novel',
+      note: excerpt.replaceAll('\n', ' '),
     );
     if (!mounted) return;
     setState(() {});
@@ -1057,6 +1286,67 @@ class _NovelReadPageState extends State<NovelReadPage>
 
   // ---------------- TTS ----------------
 
+  /// 朗读按钮：已开 → 停止；未开 → 先打开设置面板再开始
+  /// 自动滚动：定时器按速度推进滚动位置。
+  void _toggleAutoScroll() {
+    if (_autoScrollOn) {
+      _autoScrollTimer?.cancel();
+      _autoScrollTimer = null;
+      setState(() => _autoScrollOn = false);
+      return;
+    }
+    // 分页模式下自动滚动无意义，先切到滚动模式
+    if (_settings.pageMode != PageMode.scroll) {
+      _settings.update(() => _settings.pageMode = PageMode.scroll);
+      _rebuildPages();
+    }
+    setState(() => _autoScrollOn = true);
+    // 每 50ms 推进一次，速度来自设置（像素/秒）
+    _autoScrollTimer =
+        Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted || !_autoScrollOn) return;
+      if (!_scroll.hasClients) return;
+      final step = _settings.autoScrollSpeed * 0.05;
+      final next = _scroll.offset + step;
+      final max = _scroll.position.maxScrollExtent;
+      if (next >= max) {
+        // 到底：尝试追加下一话
+        _maybeLoadNextOnScroll(max, max);
+        return;
+      }
+      _scroll.jumpTo(next);
+    });
+  }
+
+  void _stopAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = null;
+    if (_autoScrollOn && mounted) setState(() => _autoScrollOn = false);
+  }
+
+  Future<void> _onTtsPressed() async {
+    if (_ttsOn) {
+      await _toggleTts();
+      return;
+    }
+    _showTtsSheet();
+  }
+
+  void _showTtsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _theme.bg,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => NovelTtsSheet(
+        settings: _settings,
+        theme: _theme,
+        onChanged: () => setState(() {}),
+        onStart: () => _toggleTts(),
+      ),
+    );
+  }
+
   Future<void> _toggleTts() async {
     if (_ttsOn) {
       await ReaderNative.instance.ttsStop();
@@ -1068,11 +1358,34 @@ class _NovelReadPageState extends State<NovelReadPage>
       if (mounted) _toast(L.t('ttsUnavailable'));
       return;
     }
-    _ttsCursor = _settings.pageMode == PageMode.scroll
-        ? 0
-        : (_pages.isNotEmpty ? _pages[_page].start : 0);
+    // 应用已保存的朗读参数
+    await ReaderNative.instance.ttsSetRate(_settings.ttsRate);
+    await ReaderNative.instance.ttsSetPitch(_settings.ttsPitch);
+    if (_settings.ttsVoiceName.isNotEmpty) {
+      await ReaderNative.instance.ttsSetVoice(_settings.ttsVoiceName);
+    }
+    // 从「当前屏幕第一个可见字」开始朗读
+    _ttsCursor = _visibleStartOffset();
     setState(() => _ttsOn = true);
     _speakFrom(_ttsCursor);
+  }
+
+  /// 当前屏幕可见内容的起始字符偏移。
+  ///
+  /// - 分页模式：当前页起点
+  /// - 滚动模式：按滚动比例换算到全文字符位置，并退到段落起点
+  int _visibleStartOffset() {
+    final src = _pageSource;
+    if (src.isEmpty) return 0;
+
+    if (_settings.pageMode == PageMode.scroll) {
+      final ratio = _scrollRatio.clamp(0.0, 1.0);
+      final at = (src.length * ratio).round().clamp(0, src.length - 1);
+      final nl = src.lastIndexOf('\n', at);
+      return (nl >= 0 ? nl + 1 : at).clamp(0, src.length - 1);
+    }
+    if (_pages.isEmpty) return 0;
+    return _pages[_page].start.clamp(0, src.length - 1);
   }
 
   void _speakFrom(int offset) {
@@ -1196,11 +1509,29 @@ class _NovelReadPageState extends State<NovelReadPage>
   @override
   Widget build(BuildContext context) {
     final bg = _theme.bg;
-    return Scaffold(
-      // 背景延伸到状态栏下方，避免状态栏区域露出系统底色
-      extendBodyBehindAppBar: true,
+    // 阅读器主题可能和 App 主题不同（例如 App 深色 + 阅读米色），
+    // 因此这里按「阅读主题」的亮度单独声明状态栏样式，
+    // 避免状态栏图标与正文底色割裂。
+    final readerIsDark = bg.computeLuminance() < 0.5;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness:
+            readerIsDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness:
+            readerIsDark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: bg,
+        systemNavigationBarIconBrightness:
+            readerIsDark ? Brightness.light : Brightness.dark,
+      ),
+      child: Scaffold(
       backgroundColor: bg,
-      body: LayoutBuilder(
+      // 用 SafeArea 让正文避开状态栏（比手动累加 padding 可靠，
+      // 之前直接算 MediaQuery.padding.top 仍会被遮挡）
+      body: SafeArea(
+        bottom: false,
+        child: LayoutBuilder(
         builder: (context, constraints) {
           // 只记录尺寸（纯赋值，无副作用）。
           // 真正的重排由 _scheduleRebuild() 在明确时机触发，
@@ -1248,8 +1579,10 @@ class _NovelReadPageState extends State<NovelReadPage>
                     onTypography: _showSettingsSheet,
                     onTheme: _showThemeSheet,
                     onBookmark: _addBookmark,
-                    onTts: _toggleTts,
+                    onTts: _onTtsPressed,
                     ttsOn: _ttsOn,
+                    onAutoScroll: _toggleAutoScroll,
+                    autoScrolling: _autoScrollOn,
                     progress: _chapterRatio,
                     onProgressChanged: (v) {
                       final total = _pages.isNotEmpty
@@ -1298,7 +1631,9 @@ class _NovelReadPageState extends State<NovelReadPage>
             ],
           );
         },
+        ),
       ),
+    ),
     );
   }
 
@@ -1332,8 +1667,10 @@ class _NovelReadPageState extends State<NovelReadPage>
         child: Text(L.t('needLoginBuy'), style: TextStyle(color: _theme.subtle)),
       );
     }
-    // 正文渲染交给独立的 NovelTextView（分页 / 滚动两种模式内部处理）
-    return NovelTextView(
+    // 正文渲染交给独立的 NovelTextView（分页 / 滚动两种模式内部处理），
+    // 外层再套翻页动画
+    return _withPageAnimation(
+      NovelTextView(
       settings: _settings,
       theme: _theme,
       pageSource: _pageSource,
@@ -1343,7 +1680,11 @@ class _NovelReadPageState extends State<NovelReadPage>
       scrollRatio: _scrollRatio,
       highlightRanges: _currentHighlightRanges(),
       onTurn: _turnPage,
-      onTap: _toggleMenu,
+      onTap: () {
+        // 用户主动操作 → 暂停自动滚动
+        _stopAutoScroll();
+        _toggleMenu();
+      },
       onSelectionChanged: _handleSelection,
       onContextMenu: _buildSelectionMenu,
       onScrollNearBottom: _maybeLoadNextOnScroll,
@@ -1355,7 +1696,88 @@ class _NovelReadPageState extends State<NovelReadPage>
       chapterKey: _chapterKey,
       chapterTitle: _chapterTitle,
       highlights: _store.annotations(widget.nid, chapterKey: _chapterKey),
+      ),
     );
+  }
+
+  /// 翻页动画包装：按 PageMode 为每页加上切换效果。
+  ///
+  /// 解耦后动画曾丢失，这里恢复：
+  /// - slide：横向滑动
+  /// - cover：新页从右覆盖旧页
+  /// - none：无动画
+  /// - scroll：不需要（整章连续滚动）
+  Widget _withPageAnimation(Widget child) {
+    if (_settings.pageMode == PageMode.scroll) return child;
+
+    switch (_settings.pageMode) {
+      case PageMode.none:
+        return child;
+
+      case PageMode.cover:
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.linear,
+          transitionBuilder: (c, animation) {
+            final incoming = c.key == ValueKey('pg$_page');
+            if (!incoming) return c; // 旧页定格，被新页覆盖
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(1, 0),
+                end: Offset.zero,
+              ).animate(animation),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: _theme.bg,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 14,
+                      offset: const Offset(-6, 0),
+                    ),
+                  ],
+                ),
+                child: c,
+              ),
+            );
+          },
+          layoutBuilder: (current, previous) => Stack(
+            alignment: Alignment.topLeft,
+            children: [...previous, if (current != null) current],
+          ),
+          child: KeyedSubtree(key: ValueKey('pg$_page'), child: child),
+        );
+
+      case PageMode.slide:
+      default:
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 240),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (c, animation) {
+            final incoming = c.key == ValueKey('pg$_page');
+            final begin = incoming
+                ? const Offset(0.12, 0)
+                : const Offset(-0.06, 0);
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: begin,
+                  end: Offset.zero,
+                ).animate(animation),
+                child: c,
+              ),
+            );
+          },
+          layoutBuilder: (current, previous) => Stack(
+            alignment: Alignment.topLeft,
+            children: [...previous, if (current != null) current],
+          ),
+          child: KeyedSubtree(key: ValueKey('pg$_page'), child: child),
+        );
+    }
   }
 
   /// 当前页（或滚动位置）对应的高亮范围。
@@ -1499,16 +1921,82 @@ class _NovelReadPageState extends State<NovelReadPage>
   // ---- 滚动模式 ----
 
   /// 滚动模式下，接近底部时自动加载下一话（连续阅读）。
+  /// 滚动接近底部时，把下一话**追加**到当前正文末尾。
+  ///
+  /// 注意：不是 `_load(jumpToChapter)`（那会替换正文、把用户传送走），
+  /// 而是延长 `_mergedText` 并重新分页，滚动位置保持不变。
   void _maybeLoadNextOnScroll(double pixels, double maxExtent) {
     if (_settings.pageMode != PageMode.scroll) return;
     if (maxExtent <= 0) return;
-    if (pixels < maxExtent - 120) return;
-    if (_index >= widget.chapters.length - 1) return;
+    // 距底部 200px 内开始预加载，保证无缝
+    if (pixels < maxExtent - 200) return;
+    if (_mergedUpto >= widget.chapters.length - 1) return;
     if (_appendingNext) return;
+
     _appendingNext = true;
-    _load(jumpToChapter: _index + 1).whenComplete(() {
+    final keepOffset = _scroll.hasClients ? _scroll.offset : null;
+
+    _appendNextChapter().whenComplete(() {
       _appendingNext = false;
+      // 追加后内容变长，保持原阅读位置不跳
+      if (keepOffset != null && mounted && _scroll.hasClients) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_scroll.hasClients) return;
+          final max = _scroll.position.maxScrollExtent;
+          _scroll.jumpTo(keepOffset.clamp(0.0, max));
+        });
+      }
     });
+  }
+
+  /// 把下一话正文拼接到 `_mergedText` 末尾（带分隔线）。
+  Future<void> _appendNextChapter() async {
+    final next = _mergedUpto + 1;
+    if (next >= widget.chapters.length) return;
+
+    final ncid = '${widget.chapters[next]['ncid'] ?? ''}';
+    if (ncid.isEmpty) return;
+    final nextTitle = '${widget.chapters[next]['title'] ?? ''}';
+
+    // 取正文：优先缓存，否则网络
+    var body = '';
+    try {
+      final cached = await NovelCacheManager.instance.get(widget.nid, ncid);
+      body = '${cached?['text'] ?? ''}';
+      if (body.isEmpty) {
+        final d = await _service.fetchNovelContent(
+          ncid: ncid,
+          lang: _langCode(),
+        );
+        body = _htmlToText('${d?['content'] ?? ''}');
+        if (body.isNotEmpty) {
+          unawaited(NovelCacheManager.instance.put(
+            widget.nid,
+            ncid,
+            nextTitle,
+            body,
+          ));
+        }
+      }
+    } catch (_) {
+      return;
+    }
+    if (body.isEmpty || !mounted) return;
+
+    setState(() {
+      // 章间分隔线
+      _mergedText += '\n\n\n'
+          '──────── $nextTitle ────────'
+          '\n\n';
+      _chapterStarts.add((
+        index: next,
+        start: _mergedText.length,
+        title: nextTitle,
+      ));
+      _mergedText += body;
+      _mergedUpto = next;
+    });
+    _scheduleRebuild();
   }
 
 

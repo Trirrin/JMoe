@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/app_state.dart';
 import '../../core/chapter_cache.dart';
 import '../../core/l10n.dart';
 
@@ -28,6 +29,12 @@ class CacheOverlay extends StatefulWidget {
 }
 
 class _CacheOverlayState extends State<CacheOverlay> {
+  /// 「今天不再询问」
+  ///
+  /// 勾选后点「边看边缓存」→ 记录到本地（按日期），当天后续进入阅读
+  /// 都直接边看边缓存，不再弹这个蒙版。次日自动失效。
+  bool _rememberToday = false;
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +54,13 @@ class _CacheOverlayState extends State<CacheOverlay> {
     if (widget.task.isCompleted) {
       widget.onWait();
     }
+  }
+
+  Future<void> _readNow() async {
+    if (_rememberToday) {
+      await AppState.instance.setCacheSkipToday(true);
+    }
+    widget.onReadNow();
   }
 
   @override
@@ -120,6 +134,37 @@ class _CacheOverlayState extends State<CacheOverlay> {
                 ],
               ),
               const SizedBox(height: 24),
+              // 「今天不再询问」：勾选后当天都直接边看边缓存
+              InkWell(
+                onTap: () => setState(() => _rememberToday = !_rememberToday),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _rememberToday
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded,
+                        size: 18,
+                        color: _rememberToday
+                            ? scheme.primary
+                            : Colors.white54,
+                      ),
+                      const SizedBox(width: 7),
+                      Text(
+                        L.t('cacheRememberToday'),
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
@@ -136,7 +181,7 @@ class _CacheOverlayState extends State<CacheOverlay> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: FilledButton(
-                      onPressed: widget.onReadNow,
+                      onPressed: _readNow,
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),

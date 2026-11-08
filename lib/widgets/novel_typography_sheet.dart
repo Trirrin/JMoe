@@ -26,7 +26,7 @@ class NovelTypographySheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

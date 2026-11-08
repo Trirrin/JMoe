@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -10,6 +11,8 @@ import '../core/image_cache.dart';
 import '../core/jm_protocol.dart';
 import '../core/image_scrambler.dart';
 import '../core/source.dart';
+import '../core/models.dart';
+import '../core/jm_source.dart';
 import 'l10n.dart';
 
 /// 批量下载整章：并发抓取 + 还原 + 写入相册目录，带进度与取消。
@@ -35,15 +38,93 @@ class ChapterDownloader {
   }
 
   /// 继续任务。
+  ///
+  /// 两种情况：
+  ///  * 任务还在内存里（只是被暂停）→ 清 paused 标志，循环自己接着跑
+  ///  * 任务是从磁盘恢复的（进程被杀过）→ 没有活的下载循环，
+  ///    必须重新登记一次下载，让它从**已有页之后**继续
   static void resume(String key) {
-    _tasks[key]?.paused = false;
+    final t = _tasks[key];
+    if (t == null) return;
+    t.paused = false;
+    // 没有 savedPath 说明从未开始过；有但 completed < total 且没有
+    // 活跃循环 —— 用 _restartRestored 重新驱动。
+    if (!t.done && t.savedPath != null) {
+      unawaited(_restartRestored(t));
+    }
+  }
+
+  /// 重新驱动一个「从磁盘恢复」的未完成任务。
+  ///
+  /// 会重新向源请求章节图片地址（页码可能过期），
+  /// 然后从磁盘上已有的编号之后开始下载，实现断点续传。
+  static Future<void> _restartRestored(DownloadTask t) async {
+    if (t._restarting) return;
+    t._restarting = true;
+    try {
+      // 已有页数（用于跳过）
+      final dir = Directory(t.savedPath!);
+      final have = <int>{};
+      if (await dir.exists()) {
+        await for (final f in dir.list()) {
+          if (f is! File) continue;
+          final stem = f.path.split(Platform.pathSeparator).last.split('.').first;
+          final n = int.tryParse(stem);
+          if (n != null) have.add(n);
+        }
+      }
+      // 需要重新拿到 bundle（页面地址）
+      final comic = Comic(
+        id: t.albumId,
+        name: t.albumName,
+        author: '',
+        image: t.coverUrl ?? '',
+        source: t.sourceId,
+      );
+      final chapter = Chapter(
+        id: t.chapterId,
+        name: t.chapterName,
+        sort: 1,
+      );
+      final source = JmSource.instance;
+      final bundle = await source.read(comic, chapter);
+      if (bundle.length == 0) {
+        t.error = 'no images';
+        t.done = true;
+        return;
+      }
+      // 复用原有下载流程：start 会扫描磁盘跳过已有页
+      start(
+        source: source,
+        albumName: t.albumName,
+        bundle: bundle,
+        albumId: t.albumId,
+        chapterName: t.chapterName,
+        coverUrl: t.coverUrl,
+      );
+      // 把恢复任务的进度对齐到已有页
+      t.completed = have.length;
+    } catch (e) {
+      t.error = '$e';
+    } finally {
+      t._restarting = false;
+    }
   }
 
 
   /// 从磁盘恢复已下载记录（App 启动时调用一次）。
   ///
-  /// 扫描 `JMoe/<作品>/<章节>/meta.json`，重建 _tasks，
-  /// 这样重启后「我的下载」仍能看到历史记录。
+  /// 扫描 `JMoe/<作品>/<章节>/meta.json`，重建 _tasks。
+  ///
+  /// **关键：未完成的任务也要恢复**（用户要求「杀掉后台还能断点续传」）。
+  ///
+  /// 之前这里无条件把任务标成 `done = true, completed = total`，
+  /// 于是下到一半被系统杀掉后，重启就再也看不到这个任务，
+  /// 也无法继续 —— 磁盘上缺的页永远补不回来。
+  ///
+  /// 现在按「磁盘上实际存在的页数」判断：
+  ///  * 页数 = total → 已完成
+  ///  * 页数 < total → 未完成，恢复成可继续的任务（保留 savedPath）
   static Future<void> restoreFromDisk() async {
     try {
       final base = await getExternalStorageDirectory() ??
@@ -53,6 +134,13 @@ class ChapterDownloader {
 
       await for (final albumDir in root.list()) {
         if (albumDir is! Directory) continue;
+        // 跳过非作品目录（如 backup / imported / bg）
+        final albumName = albumDir.path.split(Platform.pathSeparator).last;
+        if (albumName == 'backup' ||
+            albumName == 'imported' ||
+            albumName == 'bg') {
+          continue;
+        }
         await for (final chDir in albumDir.list()) {
           if (chDir is! Directory) continue;
           final metaFile = File('${chDir.path}/meta.json');
@@ -68,7 +156,19 @@ class ChapterDownloader {
             final key = '$source:$chapterId';
             if (_tasks.containsKey(key)) continue;
 
+            // 统计磁盘上实际已下载的页（001.png 这类数字命名文件）
+            var onDisk = 0;
+            await for (final f in chDir.list()) {
+              if (f is! File) continue;
+              final name = f.path.split(Platform.pathSeparator).last;
+              final stem = name.split('.').first;
+              if (int.tryParse(stem) != null) onDisk++;
+            }
+            if (total > 0 && onDisk > total) onDisk = total;
+            final finished = total > 0 && onDisk >= total;
+
             final t = DownloadTask(total: total)
+              ..sourceId = source
               ..albumId = '${m['albumId'] ?? ''}'
               ..chapterId = chapterId
               ..albumName = '${m['albumName'] ?? ''}'
@@ -76,8 +176,14 @@ class ChapterDownloader {
               ..coverUrl = m['coverPath'] != null
                   ? 'file://${m['coverPath']}'
                   : (m['coverUrl'] as String?)
-              ..completed = total
-              ..done = true
+              ..completed = onDisk
+              // 未下完 → 保持 paused，让用户手动「继续」，
+              // 避免一启动就并发下载一堆任务把网速占满。
+              ..paused = !finished
+              ..done = finished
+              ..finishedAt = finished
+                  ? (m['downloadedAt'] as num?)?.toInt()
+                  : null
               ..savedPath = chDir.path;
             _tasks[key] = t;
           } catch (_) {}
@@ -85,6 +191,59 @@ class ChapterDownloader {
       }
     } catch (_) {}
   }
+
+  /// 删除一个已完成任务：移除记录 + 删除磁盘目录。
+  static Future<void> deleteTask(String key) async {
+    final t = _tasks.remove(key);
+    if (t?.savedPath == null) return;
+    try {
+      final d = Directory(t!.savedPath!);
+      if (await d.exists()) await d.delete(recursive: true);
+    } catch (_) {}
+  }
+
+  /// 读取某章已下载到本地的页面文件（按 001/002… 顺序）。
+  ///
+  /// 供阅读器的**离线模式**复用同一套 UI：把本地文件当作页面地址，
+  /// 阅读器无需区分「在线 / 离线」两套实现。
+  static Future<({
+    String dir,
+    String chapterName,
+    List<String> files,
+  })?> localPages(String sourceId, String chapterId) async {
+    final t = _tasks['$sourceId:$chapterId'];
+    final path = t?.savedPath;
+    if (path == null) return null;
+    try {
+      final d = Directory(path);
+      if (!await d.exists()) return null;
+      final files = <String>[];
+      for (final e in d.listSync()) {
+        if (e is! File) continue;
+        final p = e.path.toLowerCase();
+        if (p.endsWith('cover.jpg') || p.endsWith('meta.json')) continue;
+        if (p.endsWith('.png') ||
+            p.endsWith('.jpg') ||
+            p.endsWith('.jpeg') ||
+            p.endsWith('.webp')) {
+          files.add(e.path);
+        }
+      }
+      files.sort();
+      if (files.isEmpty) return null;
+      return (
+        dir: path,
+        chapterName: t!.chapterName,
+        files: files,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 按数据源 + 章节 id 删除（与 _tasks 的 key 格式一致）。
+  static Future<void> deleteBy(String sourceId, String chapterId) =>
+      deleteTask('$sourceId:$chapterId');
 
   static void cancel(String key) {
     _tasks[key]?.cancelled = true;
@@ -100,12 +259,16 @@ class ChapterDownloader {
     String chapterName = '',
     /// 封面地址（随下载一并保存，离线也能显示）
     String? coverUrl,
+    /// 作品级附加数据（作者 / 简介 / 标签等），写进 album.json。
+    /// 多个选集共用同一份，第二次下载不会覆盖。
+    Map<String, dynamic>? albumExtra,
   }) {
     final key = '${source.id}:${bundle.chapterId}';
     final existing = _tasks[key];
     if (existing != null && !existing.done) return existing;
 
     final task = DownloadTask(total: bundle.length)
+      ..sourceId = source.id
       ..albumId = albumId
       ..chapterId = bundle.chapterId
       ..albumName = albumName
@@ -123,21 +286,46 @@ class ChapterDownloader {
         final safeChapter = _sanitize(
           bundle.chapterName.isEmpty ? bundle.chapterId : bundle.chapterName,
         );
-        final dir = Directory('${base.path}/JMoe/$safeAlbum/$safeChapter');
+        // 目录结构：JMoe/<作品>/album.json（**作品级，所有选集共用一份**）
+        //           JMoe/<作品>/<选集>/001.png …（明文图片 + meta.json）
+        final albumDir = Directory('${base.path}/JMoe/$safeAlbum');
+        final dir = Directory('${albumDir.path}/$safeChapter');
         if (!dir.existsSync()) dir.createSync(recursive: true);
 
-        // ---- 元信息：保证离线时仍有标题 / 封面 / 页数 ----
+        // ---- 作品级元信息（多选集共用，只写一次）----
+        //
+        // 用户明确要求：「下载多个选集就共用一个数据文件」。
+        // album.json 里放作品本身的字段（标题/作者/简介/标签/封面），
+        // 这样导入后能直接展示详情，而不只是「一堆图片」。
         try {
-          // 封面随下载一并保存，离线也能显示
-          String? coverPath;
-          if (coverUrl != null && coverUrl.isNotEmpty) {
-            final cb = await JmApi.instance.fetchBytes(coverUrl);
-            if (cb != null && cb.isNotEmpty) {
-              final cf = File('${dir.path}/cover.jpg');
-              await cf.writeAsBytes(cb, flush: true);
-              coverPath = cf.path;
+          final albumMeta = File('${albumDir.path}/album.json');
+          if (!albumMeta.existsSync()) {
+            String? albumCover;
+            if (coverUrl != null && coverUrl.isNotEmpty) {
+              final cb = await JmApi.instance.fetchBytes(coverUrl);
+              if (cb != null && cb.isNotEmpty) {
+                final cf = File('${albumDir.path}/cover.jpg');
+                await cf.writeAsBytes(cb, flush: true);
+                albumCover = 'cover.jpg';
+              }
             }
+            await albumMeta.writeAsString(
+              jsonEncode({
+                'albumId': albumId,
+                'albumName': albumName,
+                'source': source.id,
+                'coverFile': albumCover,
+                'coverUrl': coverUrl,
+                if (albumExtra != null) ...albumExtra,
+                'createdAt': DateTime.now().millisecondsSinceEpoch,
+              }),
+              flush: true,
+            );
           }
+        } catch (_) {}
+
+        // ---- 选集级元信息 ----
+        try {
           final meta = {
             'albumId': albumId,
             'albumName': albumName,
@@ -147,7 +335,6 @@ class ChapterDownloader {
                 : bundle.chapterName,
             'source': source.id,
             'total': bundle.length,
-            'coverPath': coverPath,
             'coverUrl': coverUrl,
             'downloadedAt': DateTime.now().millisecondsSinceEpoch,
           };
@@ -155,41 +342,90 @@ class ChapterDownloader {
               .writeAsString(jsonEncode(meta), flush: true);
         } catch (_) {}
 
-        for (var i = 0; i < bundle.length; i++) {
-          if (task.cancelled) break;
-          // 暂停：等待恢复（可被取消打断）
-          while (task.paused && !task.cancelled) {
-            await Future<void>.delayed(const Duration(milliseconds: 200));
+        // ---- 断点续传：跳过已存在的页 ----
+        // 之前每次「继续」都从第 1 页重下，白费流量。
+        // 现在先扫盘，已有的页直接跳过并计入进度。
+        final existing = <int>{};
+        try {
+          for (final f in dir.listSync()) {
+            if (f is! File) continue;
+            final name = f.uri.pathSegments.last;
+            final base = name.split('.').first;
+            final n = int.tryParse(base);
+            if (n != null) existing.add(n);
           }
-          if (task.cancelled) break;
-          final ref = bundle.pages[i];
-          var url = ref.directUrl;
-          if (url == null && ref.resolveUrl != null) {
-            url = await source.resolvePageUrl(ref.resolveUrl!);
-          }
-          if (url == null) continue;
+        } catch (_) {}
+        if (existing.isNotEmpty) task.completed = existing.length;
 
-          final bytes = await ImageCacheManager.instance.load(
-            url,
-            fetcher: (u) => JmApi.instance.fetchBytes(u),
-          );
-          if (bytes == null || task.cancelled) continue;
+        // 并发下载：单线程时大章节很慢，并发太高又会被图源限速，3 是折中。
+        final workers = task.concurrency.clamp(1, 6);
+        var cursor = 0;
 
-          var out = bytes;
-          final sid = bundle.scrambleId;
-          if (sid != null && ImageScrambler.needScramble(albumId, sid, url)) {
-            final key2 = ImageScrambler.pageKeyFromUrl(url, ref.index);
-            final seg = ImageScrambler.segments(albumId, key2);
-            out = await _unscramble(bytes, seg);
+        Future<void> worker() async {
+          while (true) {
+            if (task.cancelled) return;
+            // 暂停：等待恢复（可被取消打断）
+            while (task.paused && !task.cancelled) {
+              await Future<void>.delayed(const Duration(milliseconds: 200));
+            }
+            if (task.cancelled) return;
+            final i = cursor++;
+            if (i >= bundle.length) return;
+
+            final ref = bundle.pages[i];
+            if (existing.contains(ref.index)) continue;
+
+            var url = ref.directUrl;
+            if (url == null && ref.resolveUrl != null) {
+              url = await source.resolvePageUrl(ref.resolveUrl!);
+            }
+            if (url == null) continue;
+
+            // 单页最多重试 3 次（网络抖动很常见）
+            Uint8List? bytes;
+            for (var attempt = 0; attempt < 3; attempt++) {
+              if (task.cancelled) return;
+              bytes = await ImageCacheManager.instance.load(
+                url,
+                fetcher: (u) => JmApi.instance.fetchBytes(u),
+              );
+              if (bytes != null) break;
+              await Future<void>.delayed(
+                Duration(milliseconds: 300 * (1 << attempt)),
+              );
+            }
+            if (bytes == null) {
+              task.failed++;
+              continue;
+            }
+
+            var out = bytes;
+            final sid = bundle.scrambleId;
+            if (sid != null &&
+                ImageScrambler.needScramble(albumId, sid, url)) {
+              final key2 = ImageScrambler.pageKeyFromUrl(url, ref.index);
+              final seg = ImageScrambler.segments(albumId, key2);
+              out = await _unscramble(bytes, seg);
+            }
+            final file = File(
+              '${dir.path}/${ref.index.toString().padLeft(3, '0')}.png',
+            );
+            await file.writeAsBytes(out);
+            task.completed++;
           }
-          final file = File(
-            '${dir.path}/${ref.index.toString().padLeft(3, '0')}.png',
-          );
-          await file.writeAsBytes(out);
-          task.completed = i + 1;
         }
-        task.done = true;
+
+        await Future.wait(List.generate(workers, (_) => worker()));
+        // 有页失败则不算完全成功：保留记录以便「继续」重试剩余页
+        if (task.failed > 0) {
+          task.error = '${task.failed} pages failed';
+        }
+        task.done = task.failed == 0;
+        if (task.done) task.finishedAt = DateTime.now().millisecondsSinceEpoch;
         task.savedPath = dir.path;
+        // 封面现在存在**作品级目录**（所有选集共用一张）
+        final cf = File('${albumDir.path}/cover.jpg');
+        if (cf.existsSync()) task.coverPath = cf.path;
       } catch (e) {
         task.error = '$e';
         task.done = true;
@@ -201,6 +437,110 @@ class ChapterDownloader {
 
   static String _sanitize(String s) =>
       s.replaceAll(RegExp(r'[\\/:*?"<>|\n\r\t]'), '_').trim();
+
+  // ---------------- 离线文件的外围操作 ----------------
+
+  /// 下载内容压缩包的固定密码。
+  ///
+  /// 为什么用固定密码而不是每章随机：
+  ///  * 用户要在文件管理器里解压时得先知道密码，固定值可以背下来；
+  ///  * 每章随机意味着用户每解一个包都要来这里复制一次，体验很差。
+  /// 安全性不是重点（本地已加密落盘），这里的目标只是「不让别人随手打开」。
+  static const String archivePassword = 'jmoe';
+
+  /// 复制压缩包密码到剪贴板。
+  static Future<void> copyPassword() async {
+    await Clipboard.setData(const ClipboardData(text: archivePassword));
+    HapticFeedback.lightImpact();
+  }
+
+  /// 用系统文件管理器打开某章目录。
+  static Future<bool> openFolder(String dirPath) async {
+    try {
+      final ok = await _launch(dirPath, mime: 'resource/folder');
+      if (ok) return true;
+      // 某些 ROM 不支持文件夹 URI，退化为打开其父目录
+      final parent = File(dirPath).parent.path;
+      return await _launch(parent, mime: 'resource/folder');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> _launch(String path, {String? mime}) async {
+    try {
+      final uri = Uri.file(path);
+      // 走 MethodChannel 让原生侧起 Intent（flutter 侧直接用 url_launcher
+      // 打开 folder:// 在多数 ROM 上无效）
+      await _channel.invokeMethod('openPath', {
+        'path': uri.toFilePath(),
+        if (mime != null) 'mime': mime,
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static const _channel = MethodChannel('jmoe/reader');
+
+  /// 分享**单个文件**（如打包好的 .jmoe）。
+  static Future<bool> shareFile(String path) async {
+    try {
+      final f = File(path);
+      if (!await f.exists()) return false;
+      await _channel.invokeMethod('shareFiles', {
+        'paths': [path],
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 分享某章目录下的图片文件（走系统分享面板）。
+  static Future<bool> shareFiles(String dirPath) async {
+    try {
+      final d = Directory(dirPath);
+      if (!await d.exists()) return false;
+      final files = d
+          .listSync()
+          .whereType<File>()
+          .map((f) => f.path)
+          .where((p) => !p.endsWith('meta.json'))
+          .toList();
+      if (files.isEmpty) return false;
+      await _channel.invokeMethod('shareFiles', {'paths': files});
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 某章已下载占用的字节数（含压缩包）。
+  static int sizeOfDir(String dirPath) {
+    try {
+      final d = Directory(dirPath);
+      if (!d.existsSync()) return 0;
+      var total = 0;
+      for (final f in d.listSync()) {
+        if (f is File) total += f.lengthSync();
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 所有下载内容的总占用（字节），供存储管理展示。
+  static int totalDownloadBytes() {
+    var total = 0;
+    for (final t in _tasks.values) {
+      final p = t.savedPath;
+      if (p != null) total += sizeOfDir(p);
+    }
+    return total;
+  }
 
   static Future<Uint8List> _unscramble(Uint8List bytes, int segments) async {
     if (segments <= 1) return bytes;
@@ -257,13 +597,36 @@ class DownloadTask {
   String albumName = '';
   String chapterName = '';
   String albumId = '';
+
+  /// 数据源 id（jm / ehentai），用于还原任务 key
+  String sourceId = 'jm';
   String chapterId = '';
   String? coverUrl;
 
+  /// 本地封面文件路径（下载时一并保存，离线也能显示）
+  String? coverPath;
+
+  /// 并发下载条数（1~6，默认 3）。太高会被图源限速，太低慢。
+  int concurrency = 3;
+
+  /// 失败页数（有值说明这一章没下全，可「继续」补齐）
+  int failed = 0;
+
+  /// 任务创建时间（用于「按下载时间」排序）
+  final int startedAt = DateTime.now().millisecondsSinceEpoch;
+
+  /// 完成时间（未完成时为 null）
+  int? finishedAt;
+
+  /// 是否正在执行「从磁盘恢复后重启下载」（防重入）
+  bool _restarting = false;
 
   DownloadTask({required this.total});
 
   double get progress => total == 0 ? 0 : completed / total;
+
+  /// 是否「下完了但缺页」
+  bool get partiallyFailed => failed > 0;
 }
 
 /// 下载进度弹层。

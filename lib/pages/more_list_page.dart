@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/app_theme.dart';
 import '../core/models.dart';
 import '../core/source.dart';
+import '../widgets/detail_route.dart';
 import '../widgets/common_widgets.dart';
 import 'unified_detail_page.dart';
 import '../core/l10n.dart';
@@ -203,8 +204,7 @@ class _MoreListPageState extends State<MoreListPage> {
                             heat: c.heat?.toString(),
                             category: c.category,
                             onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => UnifiedDetailPage(
+                              detailRoute(builder: (_) => UnifiedDetailPage(
                                   source: widget.source,
                                   comic: c,
                                 ),

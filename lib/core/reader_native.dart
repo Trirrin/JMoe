@@ -70,6 +70,40 @@ class ReaderNative {
     } catch (_) {}
   }
 
+  /// 设置音调（0.5 ~ 2.0）。
+  Future<void> ttsSetPitch(double pitch) async {
+    try {
+      await _ch.invokeMethod('ttsSetPitch', {'pitch': pitch});
+    } catch (_) {}
+  }
+
+  /// 获取设备可用音色列表：[{name, locale}]
+  Future<List<Map<String, String>>> ttsGetVoices() async {
+    try {
+      final r = await _ch.invokeMethod<List>('ttsGetVoices');
+      if (r == null) return const [];
+      return r
+          .whereType<Map>()
+          .map((e) => {
+                'name': '${e['name'] ?? ''}',
+                'locale': '${e['locale'] ?? ''}',
+              })
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 按名称选择音色。
+  Future<bool> ttsSetVoice(String name) async {
+    try {
+      final r = await _ch.invokeMethod<bool>('ttsSetVoice', {'name': name});
+      return r ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> ttsAvailable() async {
     try {
       final r = await _ch.invokeMethod<bool>('ttsAvailable');

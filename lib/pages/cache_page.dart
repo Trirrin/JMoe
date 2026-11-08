@@ -4,6 +4,7 @@ import '../core/cache_manager.dart';
 import '../core/l10n.dart';
 import '../core/chapter_cache.dart';
 import '../core/novel_cache.dart';
+import '../core/temp_store.dart';
 import '../widgets/common_widgets.dart';
 
 /// 缓存管理页：占用统计、容量上限、保留时长、清理操作、已缓存章节列表。
@@ -20,6 +21,8 @@ class _CachePageState extends State<CachePage> {
   double _ratio = 0;
   int _chapterCount = 0;
   int _novelBytes = 0;
+  int _tempBytes = 0;
+  int _tempChapters = 0;
   bool _loading = true;
 
   @override
@@ -38,6 +41,8 @@ class _CachePageState extends State<CachePage> {
   Future<void> _refresh() async {
     final s = await CacheManager.instance.usageStats();
     final novelBytes = await NovelCacheManager.instance.usedBytes();
+    final tempBytes = await TempStore.instance.usedBytes();
+    final tempChapters = await TempStore.instance.chapterCount();
     if (!mounted) return;
     setState(() {
       _usedBytes = s.used;
@@ -45,6 +50,8 @@ class _CachePageState extends State<CachePage> {
       _ratio = s.ratio;
       _chapterCount = CacheManager.instance.cachedChapters.length;
       _novelBytes = novelBytes;
+      _tempBytes = tempBytes;
+      _tempChapters = tempChapters;
       _loading = false;
     });
   }
@@ -67,18 +74,18 @@ class _CachePageState extends State<CachePage> {
 
     return Scaffold(
       appBar: AppBar(
+        // 刷新按钮已移除：改为下拉刷新，入口统一
         title: Text(L.t('cacheManage')),
-        actions: [
-          IconButton(
-            tooltip: L.t('refresh'),
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _refresh,
-          ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
+          : RefreshIndicator(
+              onRefresh: _refresh,
+              edgeOffset: MediaQuery.of(context).padding.top,
+              child: ListView(
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
               padding: const EdgeInsets.only(bottom: 32),
               children: [
                 // 占用卡片
@@ -245,6 +252,42 @@ class _CachePageState extends State<CachePage> {
                   ),
                 ),
 
+                SectionHeader(title: L.t('tempSection')),
+                ListTile(
+                  leading: const Icon(Icons.folder_delete_outlined),
+                  title: Text(L.t('tempUsed')),
+                  subtitle: Text(
+                    L.tp('tempDetail', {
+                      'size': _fmt(_tempBytes),
+                      'n': _tempChapters,
+                    }),
+                  ),
+                  trailing: TextButton(
+                    onPressed: _tempBytes <= 0
+                        ? null
+                        : () async {
+                            await TempStore.instance.clearAll();
+                            if (!mounted) return;
+                            await _refresh();
+                          },
+                    child: Text(L.t('clear')),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    L.tp('tempDesc', {
+                      'mb': TempStore.maxTotalBytes ~/ (1024 * 1024),
+                      'min': TempStore.idleTtl.inMinutes,
+                    }),
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+
                 SectionHeader(title: L.t('cacheCleanSection')),
                 ListTile(
                   leading: Icon(Icons.auto_delete_outlined, color: scheme.primary),
@@ -267,6 +310,7 @@ class _CachePageState extends State<CachePage> {
                     L.t('clearAllCache'),
                     style: TextStyle(color: scheme.error),
                   ),
+                  // 正向说明「删什么」，不列举「保留什么」（那样反而误导）
                   subtitle: Text(L.t('clearAllCacheDesc')),
                   onTap: () async {
                     final ok = await showDialog<bool>(
@@ -295,6 +339,17 @@ class _CachePageState extends State<CachePage> {
 
                 if (chapters.isNotEmpty) ...[
                   SectionHeader(title: L.t('cachedChapters')),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                    child: Text(
+                      L.t('clearChapterHint'),
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.5,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
                   ...chapters.map((e) {
                     final key = '${e['key']}';
                     return ListTile(
@@ -325,10 +380,17 @@ class _CachePageState extends State<CachePage> {
                         onPressed: () async {
                           final parts = key.split(':');
                           if (parts.length == 2) {
+                            // 只清这一章：不能调 clearAll（那会连全部
+                            // 章节 + 所有图片缓存一起清空）
                             ChapterCacheManager.instance
                                 .cancelTask(parts[0], parts[1]);
-                            await cm.unmarkChapter(parts[0], parts[1]);
-                            await cm.clearAll();
+                            final urls =
+                                (e['imageUrls'] as List?)?.whereType<String>();
+                            await cm.clearChapter(
+                              parts[0],
+                              parts[1],
+                              imageUrls: urls?.toList() ?? const [],
+                            );
                           }
                           await _refresh();
                         },
@@ -337,6 +399,7 @@ class _CachePageState extends State<CachePage> {
                   }),
                 ],
               ],
+              ),
             ),
     );
   }

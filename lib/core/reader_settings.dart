@@ -73,6 +73,19 @@ class ReaderSettings extends ChangeNotifier {
   bool keepScreenOn = true;
   double brightness = 0; // -1..1，0 表示跟随系统
 
+  // ---- 朗读 ----
+  /// 语速（0.5 ~ 3.0）
+  double ttsRate = 1.0;
+
+  /// 音调（0.5 ~ 2.0）
+  double ttsPitch = 1.0;
+
+  /// 选中的音色名称（空 = 系统默认）
+  String ttsVoiceName = '';
+
+  /// 自动滚动速度（像素/秒）
+  double autoScrollSpeed = 40;
+
   // ---- 统计 ----
   int readingSecondsTotal = 0;
 
@@ -170,6 +183,11 @@ class ReaderSettings extends ChangeNotifier {
         showBattery = (m['showBattery'] as bool?) ?? showBattery;
         keepScreenOn = (m['keepScreenOn'] as bool?) ?? keepScreenOn;
         brightness = (m['brightness'] as num?)?.toDouble() ?? brightness;
+      ttsRate = (m['ttsRate'] as num?)?.toDouble() ?? ttsRate;
+      ttsPitch = (m['ttsPitch'] as num?)?.toDouble() ?? ttsPitch;
+      ttsVoiceName = (m['ttsVoiceName'] as String?) ?? ttsVoiceName;
+      autoScrollSpeed =
+          (m['autoScrollSpeed'] as num?)?.toDouble() ?? autoScrollSpeed;
         readingSecondsTotal =
             (m['readingSecondsTotal'] as num?)?.toInt() ?? readingSecondsTotal;
       }
@@ -211,6 +229,10 @@ class ReaderSettings extends ChangeNotifier {
           'showBattery': showBattery,
           'keepScreenOn': keepScreenOn,
           'brightness': brightness,
+        'ttsRate': ttsRate,
+        'ttsPitch': ttsPitch,
+        'ttsVoiceName': ttsVoiceName,
+        'autoScrollSpeed': autoScrollSpeed,
           'readingSecondsTotal': readingSecondsTotal,
         }),
       );

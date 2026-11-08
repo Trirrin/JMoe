@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'image_cache.dart';
+import 'temp_store.dart';
 
 /// 缓存治理：容量上限、保留时长、按章节/全部清理。
 ///
@@ -57,7 +58,7 @@ class CacheManager {
     return d;
   }
 
-  /// 当前占用（字节）
+  /// 当前占用（字节）：图片缓存 + 大章节临时目录。
   Future<int> usedBytes() async {
     final d = await _dir();
     var total = 0;
@@ -68,6 +69,9 @@ class CacheManager {
         } catch (_) {}
       }
     }
+    try {
+      total += await TempStore.instance.usedBytes();
+    } catch (_) {}
     return total;
   }
 
@@ -123,12 +127,42 @@ class CacheManager {
         }
       }
       revision.value++;
+      // 临时目录按自己的策略（空闲超时 + 总量上限）独立清扫
+      unawaited(TempStore.instance.sweep());
     } catch (_) {}
   }
 
-  /// 清理全部缓存。
+  /// 清理全部缓存（图片缓存 + 大章节临时目录）。
+  ///
+  /// ⚠️ 只清这两项。**不要**在这里顺带清章节索引：索引只是「哪些章节
+  /// 完整缓存过」的登记表，图片被清掉后由 [reconcileIndex] 自动对账剔除；
+  /// 反过来「删某一章」也绝不能调这里 —— 那会把所有章节和全部图片缓存
+  /// 一起清空，用户只删一本却发现整个缓存都没了。
   Future<void> clearAll() async {
     await ImageCacheManager.instance.clearDisk();
+    await TempStore.instance.clearAll();
+    revision.value++;
+  }
+
+  /// 只清某一章的缓存：该章的图片 + 临时目录 + 索引条目。
+  ///
+  /// 不影响其它章节，也不影响其它图片缓存。
+  Future<void> clearChapter(
+    String sourceId,
+    String chapterId, {
+    List<String> imageUrls = const [],
+  }) async {
+    // 1) 该章在内存/磁盘上的图片（按已知 URL 精确删除）
+    for (final url in imageUrls) {
+      await ImageCacheManager.instance.evict(url);
+    }
+    // 2) 该章的临时目录
+    try {
+      final dir = await TempStore.instance.dirFor(sourceId, chapterId);
+      await TempStore.instance.remove(dir);
+    } catch (_) {}
+    // 3) 索引条目
+    await unmarkChapter(sourceId, chapterId);
     revision.value++;
   }
 
@@ -184,6 +218,9 @@ class CacheManager {
     required String chapterName,
     String? cover,
     int total = 0,
+    /// 该章的图片 URL 列表：删章时用来精确清掉这几张图的缓存，
+    /// 而不是把整个图片缓存目录清空。
+    List<String> imageUrls = const [],
   }) async {
     final key = '$sourceId:$chapterId';
     _index.removeWhere((e) => e['key'] == key);
@@ -196,6 +233,7 @@ class CacheManager {
       'chapterName': chapterName,
       'cover': cover,
       'total': total,
+      'imageUrls': imageUrls,
       'at': DateTime.now().millisecondsSinceEpoch,
     });
     if (_index.length > 500) _index = _index.sublist(0, 500);
