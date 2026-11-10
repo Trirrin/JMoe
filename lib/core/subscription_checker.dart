@@ -186,7 +186,7 @@ class _SubscriptionsPageState extends State<SubscriptionsPage> {
     final items = SubscriptionStore.instance.items;
     return Scaffold(
       appBar: AppBar(
-        title: Text('更新订阅'),
+        title: const Text('更新订阅'),
         actions: [
           IconButton(
             tooltip: '立即检查',

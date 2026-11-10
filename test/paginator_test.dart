@@ -82,7 +82,7 @@ void main() {
     });
 
     test('首行缩进时仍覆盖全文长度（缩进会改变文本）', () {
-      final text = '第一段。\n第二段。';
+      const text = '第一段。\n第二段。';
       final pages = paginator.paginate(
         text: text,
         style: style,

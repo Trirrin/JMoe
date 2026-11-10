@@ -1322,7 +1322,7 @@ class _ProgressPainter extends CustomPainter {
     final w = size.width;
     const h = 3.5;
     final barRect = Rect.fromLTWH(0, cy - h / 2, w, h);
-    final radius = Radius.circular(h / 2);
+    const radius = Radius.circular(h / 2);
 
     canvas.drawRRect(
       RRect.fromRectAndRadius(barRect, radius),

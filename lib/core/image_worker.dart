@@ -122,36 +122,31 @@ class ImageWorker {
     var img = im.decodeImage(bytes);
     if (img == null) return null;
 
-    if (maxWidth != null && maxWidth > 0 && img.width > maxWidth) {
-      img = im.copyResize(img, width: maxWidth);
-    }
+    final srcW = img.width;
+    var srcH = img.height;
 
-    final w = img.width;
-    final h = img.height;
-
-    if (segments > 1 && h >= segments) {
-      final dst = im.Image(width: w, height: h, numChannels: 3);
-      final rem = h % segments;
-      final baseH = h ~/ segments;
+    if (segments > 1 && srcH >= segments) {
+      final dst = im.Image(width: srcW, height: srcH, numChannels: 3);
+      final rem = srcH % segments;
+      final baseH = srcH ~/ segments;
       for (var i = 0; i < segments; i++) {
         var ch = baseH;
         var py = baseH * i;
-        final y = h - baseH * (i + 1) - rem;
+        final y = srcH - baseH * (i + 1) - rem;
         if (i == 0) {
           ch += rem;
         } else {
           py += rem;
         }
         if (ch <= 0) continue;
-        final strip = im.copyCrop(img, x: 0, y: y, width: w, height: ch);
-        im.compositeImage(
-          dst,
-          strip,
-          dstX: 0,
-          dstY: py,
-        );
+        final strip = im.copyCrop(img, x: 0, y: y, width: srcW, height: ch);
+        im.compositeImage(dst, strip, dstX: 0, dstY: py);
       }
-      return Uint8List.fromList(im.encodeJpg(dst, quality: quality));
+      img = dst;
+    }
+
+    if (maxWidth != null && maxWidth > 0 && img.width > maxWidth) {
+      img = im.copyResize(img, width: maxWidth);
     }
 
     return Uint8List.fromList(im.encodeJpg(img, quality: quality));

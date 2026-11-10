@@ -127,7 +127,7 @@ class _LoginPageState extends State<LoginPage> {
             controller: _user,
             decoration:  InputDecoration(
               labelText: L.t('username'),
-              prefixIcon: Icon(Icons.person_outline, size: 20),
+              prefixIcon: const Icon(Icons.person_outline, size: 20),
             ),
             textInputAction: TextInputAction.next,
           ),
@@ -137,7 +137,7 @@ class _LoginPageState extends State<LoginPage> {
             obscureText: true,
             decoration:  InputDecoration(
               labelText: L.t('password'),
-              prefixIcon: Icon(Icons.lock_outline, size: 20),
+              prefixIcon: const Icon(Icons.lock_outline, size: 20),
             ),
           ),
           if (_register) ...[
@@ -147,7 +147,7 @@ class _LoginPageState extends State<LoginPage> {
               obscureText: true,
               decoration:  InputDecoration(
                 labelText: L.t('confirmPassword'),
-                prefixIcon: Icon(Icons.lock_reset, size: 20),
+                prefixIcon: const Icon(Icons.lock_reset, size: 20),
               ),
             ),
             const SizedBox(height: 12),
@@ -156,7 +156,7 @@ class _LoginPageState extends State<LoginPage> {
               keyboardType: TextInputType.emailAddress,
               decoration:  InputDecoration(
                 labelText: L.t('email'),
-                prefixIcon: Icon(Icons.mail_outline, size: 20),
+                prefixIcon: const Icon(Icons.mail_outline, size: 20),
               ),
             ),
             const SizedBox(height: 12),
@@ -167,7 +167,7 @@ class _LoginPageState extends State<LoginPage> {
                     controller: _code,
                     decoration:  InputDecoration(
                       labelText: L.t('emailCode'),
-                      prefixIcon: Icon(Icons.verified_outlined, size: 20),
+                      prefixIcon: const Icon(Icons.verified_outlined, size: 20),
                     ),
                   ),
                 ),

@@ -12,6 +12,7 @@ import '../core/app_theme.dart';
 import '../core/image_cache.dart';
 import '../core/jm_service.dart';
 import '../core/background_task.dart';
+import '../core/detail_cache.dart';
 import '../core/models.dart';
 import '../core/downloader.dart';
 import '../core/share_util.dart';
@@ -135,6 +136,24 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   }
 
   Future<void> _load() async {
+    final key = '${widget.source.id}:${widget.comic.id}';
+    final cached = DetailCache.instance.get<DetailInfo>(key);
+    if (cached != null) {
+      DetailCache.instance.touch(key);
+      setState(() {
+        _info = cached;
+        _loading = false;
+        _error = null;
+        _fav = cached.comic.isFavorite || _fav;
+        _liked = cached.comic.liked || cached.liked;
+        final lastRead = AppState.instance.lastReadFor(_comic.id);
+        final idx = cached.chapters.indexWhere(
+          (c) => c.id == (lastRead?.chapterId ?? ''),
+        );
+        _selectedChapter = idx >= 0 ? idx : 0;
+      });
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
@@ -142,6 +161,7 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     try {
       final info = await widget.source.detail(widget.comic);
       if (!mounted) return;
+      DetailCache.instance.put(key, info);
       setState(() {
         _info = info;
         _loading = false;
@@ -293,6 +313,8 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   Future<void> _toggleFavorite() async {
     HapticFeedback.lightImpact();
     final target = !_fav;
+    DetailCache.instance
+        .invalidate('${widget.source.id}:${widget.comic.id}');
 
     setState(() => _fav = target);
     await AppState.instance.setLocalFavorite(
@@ -561,40 +583,36 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                         ),
                         const SizedBox(height: 6),
                         if (_comic.author.isNotEmpty)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              Flexible(
-                                child: GestureDetector(
-                                  onTap: () => _searchAuthor(_comic.author),
+                              for (final a in _comic.authorList)
+                                GestureDetector(
+                                  onTap: () => _searchAuthor(a),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Flexible(
-                                        child: Text(
-                                          _comic.author,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.labelMedium
-                                              ?.copyWith(
-                                            color: Colors.white,
-                                            decoration:
-                                                TextDecoration.underline,
-                                            decorationColor: Colors.white54,
-                                          ),
+                                      Text(
+                                        a,
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(
+                                          color: Colors.white,
+                                          decoration:
+                                              TextDecoration.underline,
+                                          decorationColor: Colors.white54,
                                         ),
                                       ),
-                                      const SizedBox(width: 4),
+                                      const SizedBox(width: 2),
                                       const Icon(
                                         Icons.chevron_right_rounded,
-                                        size: 14,
+                                        size: 13,
                                         color: Colors.white54,
                                       ),
                                     ],
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 6),
                               GestureDetector(
                                 onTap: _toggleFollowAuthor,
                                 child: Container(

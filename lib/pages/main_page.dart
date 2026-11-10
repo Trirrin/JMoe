@@ -21,6 +21,14 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage>
     with SingleTickerProviderStateMixin {
+  static const _sysCh = MethodChannel('jmoe/reader');
+
+  Future<void> _moveToBack() async {
+    try {
+      await _sysCh.invokeMethod('moveToBack');
+    } catch (_) {}
+  }
+
   int _index = 0;
   int _prevIndex = 0;
   bool _animating = false;
@@ -150,7 +158,7 @@ class _MainPageState extends State<MainPage>
           _onSelect(0);
           return;
         }
-        SystemNavigator.pop(animated: true);
+        _moveToBack();
       },
       child: Scaffold(
         body: ClipRect(

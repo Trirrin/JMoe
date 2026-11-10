@@ -692,18 +692,15 @@ class _SearchPageState extends State<SearchPage>
         _tags[i] = v;
       }
       _editingTagIndex = null;
+      if (_tags.isEmpty) {
+        _tagMode = false;
+        _lastQuery = '';
+      }
     });
     ctrl.dispose();
     _tagEditCtrl = null;
-    if (_tags.isNotEmpty) {
-      _search(asTag: true);
-    } else {
-      setState(() {
-        _tagMode = false;
-        _lastQuery = '';
-        _clearResults();
-      });
-    }
+    if (_tags.isEmpty) _clearResults();
+    _focus.requestFocus();
   }
 
   bool _onBackspace() {
@@ -761,7 +758,12 @@ class _SearchPageState extends State<SearchPage>
     }
 
     return GestureDetector(
-      onTap: () => _beginEditTag(index),
+      onTap: () {
+        _beginEditTag(index);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _focus.requestFocus();
+        });
+      },
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 5, 4, 5),
         decoration: BoxDecoration(
@@ -781,9 +783,8 @@ class _SearchPageState extends State<SearchPage>
             ),
             const SizedBox(width: 2),
             InkResponse(
+              canRequestFocus: false,
               onTap: () {
-                final hadFocus = _focus.hasFocus;
-
                 setState(() {
                   _tags.removeAt(index);
                   if (_editingTagIndex == index) {
@@ -794,22 +795,13 @@ class _SearchPageState extends State<SearchPage>
                       _editingTagIndex! > index) {
                     _editingTagIndex = _editingTagIndex! - 1;
                   }
-                });
-
-                if (_tags.isNotEmpty) {
-                  _resubmit();
-                } else {
-                  setState(() {
+                  if (_tags.isEmpty) {
                     _tagMode = false;
                     _lastQuery = '';
-                    _clearResults();
-                  });
-                }
-
-                if (hadFocus && mounted) _focus.requestFocus();
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted && hadFocus) _focus.requestFocus();
+                  }
                 });
+                if (_tags.isEmpty) _clearResults();
+                _focus.requestFocus();
               },
               radius: 14,
               child: SizedBox(
@@ -953,27 +945,69 @@ class _SearchPageState extends State<SearchPage>
                       ],
                       if (jmOnly && _isComic) ...[
                         label(L.t('yearLabel')),
-                        chips(
-                          value: draftYear,
-                          options: [
-                            for (final y in years)
-                              (y, y.isEmpty ? L.t('all') : y),
-                          ],
-                          onPick: (v) => draftYear = v,
-                          onAfter: () {
-                            if (draftYear.isEmpty) draftMonth = '';
-                            setS(() {});
-                          },
+                        SizedBox(
+                          height: 40,
+                          child: DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            isDense: true,
+                            value: draftYear,
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              border: OutlineInputBorder(),
+                            ),
+                            items: [
+                              for (final y in years)
+                                DropdownMenuItem(
+                                  value: y,
+                                  child: Text(
+                                    y.isEmpty ? L.t('all') : y,
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setState(() {
+                                draftYear = v;
+                                if (v.isEmpty) draftMonth = '';
+                              });
+                            },
+                          ),
                         ),
                         label(L.t('monthLabel')),
-                        chips(
-                          key: ValueKey('month_row_$draftYear'),
-                          value: draftMonth,
-                          options: [
-                            for (final m in months)
-                              (m, m.isEmpty ? L.t('all') : m),
-                          ],
-                          onPick: (v) => draftMonth = v,
+                        SizedBox(
+                          height: 40,
+                          child: DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            isDense: true,
+                            value: draftMonth,
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              border: OutlineInputBorder(),
+                            ),
+                            items: [
+                              for (final m in months)
+                                DropdownMenuItem(
+                                  value: m,
+                                  child: Text(
+                                    m.isEmpty ? L.t('all') : m,
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setState(() => draftMonth = v);
+                            },
+                          ),
                         ),
                       ],
                     ],

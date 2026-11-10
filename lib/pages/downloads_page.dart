@@ -49,14 +49,24 @@ class DownloadsPageState extends State<DownloadsPage> {
   @override
   void initState() {
     super.initState();
-    _ticker = Timer.periodic(const Duration(milliseconds: 400), (_) {
-      if (mounted) setState(() {});
+    _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (mounted && _hasActiveTask()) _tick.value++;
     });
+  }
+
+  final _tick = ValueNotifier<int>(0);
+
+  bool _hasActiveTask() {
+    for (final t in ChapterDownloader.allTasks) {
+      if (!t.done) return true;
+    }
+    return false;
   }
 
   @override
   void dispose() {
     _ticker?.cancel();
+    _tick.dispose();
     super.dispose();
   }
 
@@ -134,7 +144,9 @@ class DownloadsPageState extends State<DownloadsPage> {
       ],
     );
 
-    final bodyContent = RefreshIndicator(
+    final bodyContent = ValueListenableBuilder<int>(
+      valueListenable: _tick,
+      builder: (context, _, _) => RefreshIndicator(
         onRefresh: () async {
           await ChapterDownloader.restoreFromDisk();
           if (mounted) setState(() {});
@@ -193,6 +205,7 @@ class DownloadsPageState extends State<DownloadsPage> {
               ..._buildGroups(theme, done),
           ],
         ),
+      ),
     );
 
     if (widget.embedded) {

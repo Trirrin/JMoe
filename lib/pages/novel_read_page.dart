@@ -463,7 +463,7 @@ class _NovelReadPageState extends State<NovelReadPage>
     final h = _pageArea.height - _settings.marginV * 2 - bottomInset;
     if (w <= 0 || h <= 0) return;
 
-    final paginator = const TextPaginator();
+    const paginator = TextPaginator();
     final pages = paginator.paginate(
       text: src,
       style: style,

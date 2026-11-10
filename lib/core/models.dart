@@ -21,6 +21,20 @@ String cleanAuthor(String raw) {
   return s;
 }
 
+List<String> splitAuthors(String raw) {
+  final base = cleanAuthor(raw);
+  if (base.isEmpty) return const [];
+  final parts = base.split(RegExp(r'\s*[,，、;/｜|]\s*'));
+  final out = <String>[];
+  for (final p in parts) {
+    final t = cleanAuthor(p);
+    if (t.isEmpty) continue;
+    if (out.contains(t)) continue;
+    out.add(t);
+  }
+  return out;
+}
+
 class Comic {
   final String id;
   final String name;
@@ -35,6 +49,8 @@ class Comic {
   final String source;
 
   final int? heat;
+
+  List<String> get authorList => splitAuthors(author);
 
   const Comic({
     required this.id,

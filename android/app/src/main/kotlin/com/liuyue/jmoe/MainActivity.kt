@@ -241,6 +241,12 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+                "moveToBack" -> {
+                    runOnUiThread {
+                        moveTaskToBack(true)
+                        result.success(true)
+                    }
+                }
                 "keepScreenOn" -> {
                     val on = call.argument<Boolean>("on") ?: true
                     runOnUiThread {

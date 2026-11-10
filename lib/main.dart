@@ -137,7 +137,6 @@ class _JmoeAppState extends State<JmoeApp> {
   Widget build(BuildContext context) {
     final state = AppState.instance;
     return MaterialApp(
-      key: ValueKey('app_${state.uiLang}'),
       title: 'JMoe',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [

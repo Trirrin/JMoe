@@ -369,9 +369,23 @@ class JmService {
     required bool target,
   }) async {
     try {
+      if (!target) {
+        final r = await toggleFavorite(aid);
+        if (r['code'] != 200) {
+          return (ok: false, error: '${r['errorMsg'] ?? 'code=${r['code']}'}');
+        }
+        final after = await _isFavoriteOnCloud(aid);
+        if (after == null || after == false) return (ok: true, error: null);
+        return (ok: false, error: 'still favorited');
+      }
+
       final current = await _isFavoriteOnCloud(aid);
       if (current == null) {
-        return (ok: false, error: 'cannot read favorite state');
+        final r = await toggleFavorite(aid);
+        if (r['code'] != 200) {
+          return (ok: false, error: '${r['errorMsg'] ?? 'code=${r['code']}'}');
+        }
+        return (ok: true, error: null);
       }
       if (current == target) {
         return (ok: true, error: null);
@@ -381,9 +395,7 @@ class JmService {
         return (ok: false, error: '${r['errorMsg'] ?? 'code=${r['code']}'}');
       }
       final after = await _isFavoriteOnCloud(aid);
-      if (after == null) {
-        return (ok: false, error: 'cannot verify favorite state');
-      }
+      if (after == null) return (ok: true, error: null);
       if (after == target) return (ok: true, error: null);
       return (ok: false, error: 'state mismatch after toggle');
     } catch (e) {

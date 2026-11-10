@@ -325,6 +325,22 @@ class ImageCacheManager {
 
   final List<String> _uiLru = [];
 
+  void trimToPages(int maxPages) {
+    var guard = 0;
+    while (_uiCache.length > maxPages && _uiLru.isNotEmpty && guard++ < 4096) {
+      final oldest = _uiLru.removeAt(0);
+      final removed = _uiCache.remove(oldest);
+      if (removed == null) continue;
+      final s = _uiSize.remove(oldest);
+      if (s != null) _uiTotal -= s;
+    }
+    if (_uiTotal < 0) _uiTotal = 0;
+  }
+
+  int get uiPageCount => _uiCache.length;
+
+  int get uiBytes => _uiTotal;
+
   void _touchUi(String url) {
     _uiLru.remove(url);
     _uiLru.add(url);
@@ -356,6 +372,28 @@ class ImageCacheManager {
       return frame.image;
     } catch (_) {
       return decode(bytes);
+    }
+  }
+
+  static Future<ui.Image?> resizeImage(ui.Image src, int targetWidth) async {
+    if (targetWidth <= 0 || targetWidth >= src.width) return src;
+    try {
+      final ratio = targetWidth / src.width;
+      final th = (src.height * ratio).round().clamp(1, 1 << 20);
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawImageRect(
+        src,
+        Rect.fromLTWH(0, 0, src.width.toDouble(), src.height.toDouble()),
+        Rect.fromLTWH(0, 0, targetWidth.toDouble(), th.toDouble()),
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      final pic = recorder.endRecording();
+      final out = await pic.toImage(targetWidth, th);
+      pic.dispose();
+      return out;
+    } catch (_) {
+      return src;
     }
   }
 

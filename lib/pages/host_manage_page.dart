@@ -266,31 +266,6 @@ class _HostManagePageState extends State<HostManagePage> {
                   child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
               children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: SwitchListTile(
-                    dense: true,
-                    secondary:
-                        const Icon(Icons.fast_forward_rounded, size: 20),
-                    title: Text(
-                      L.t('skipStartupPage'),
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    subtitle: Text(
-                      L.t('skipStartupPageDesc'),
-                      style: const TextStyle(fontSize: 10.5),
-                    ),
-                    value: HostStore.instance.skipStartup,
-                    onChanged: (v) async {
-                      await HostStore.instance.setSkipStartup(v);
-                      if (mounted) setState(() {});
-                    },
-                  ),
-                ),
-                const SizedBox(height: 22),
                 Text(
                   L.t('apiLine'),
                   style: theme.textTheme.titleSmall?.copyWith(

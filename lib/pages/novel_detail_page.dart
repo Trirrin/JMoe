@@ -260,8 +260,8 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
           ),
           if (_detail == null) ...[
             const SizedBox(height: 14),
-            Row(
-              children: const [
+            const Row(
+              children: [
                 ShimmerBox(width: 56, height: 22, radius: 11),
                 SizedBox(width: 6),
                 ShimmerBox(width: 72, height: 22, radius: 11),
@@ -353,8 +353,8 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                 ),
                 const SizedBox(height: 8),
                 if (_detail == null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 24),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
                     child: Center(
                       child: SizedBox(
                         width: 20,

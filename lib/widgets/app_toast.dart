@@ -107,6 +107,15 @@ class _ToastViewState extends State<_ToastView>
     super.dispose();
   }
 
+  Color _iconColor(ColorScheme scheme) {
+    final a = widget.accent;
+    if (a == null) return scheme.onInverseSurface;
+    final bg = scheme.inverseSurface;
+    final d = (a.computeLuminance() - bg.computeLuminance()).abs();
+    if (d < 0.35) return scheme.onInverseSurface;
+    return a;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -145,7 +154,11 @@ class _ToastViewState extends State<_ToastView>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (widget.icon != null) ...[
-                    Icon(widget.icon, size: 18, color: accent),
+                    Icon(
+                      widget.icon,
+                      size: 18,
+                      color: _iconColor(scheme),
+                    ),
                     const SizedBox(width: 10),
                   ],
                   Flexible(

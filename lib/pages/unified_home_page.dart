@@ -355,11 +355,11 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
 
   Widget _buildQuickEntries() {
     final items = <(Widget Function(Color), String, Widget)>[
-      ((c) => AppIcons.anime(size: 21, color: c), L.t('anime'), AnimePage()),
-      ((c) => AppIcons.novel(size: 21, color: c), L.t('novels'), NovelsPage()),
+      ((c) => AppIcons.anime(size: 21, color: c), L.t('anime'), const AnimePage()),
+      ((c) => AppIcons.novel(size: 21, color: c), L.t('novels'), const NovelsPage()),
       ((c) => Icon(Icons.auto_awesome_rounded, size: 20, color: c),
-          L.t('weeklyMustSee'), WeekPage()),      ((c) => Icon(Icons.history_rounded, size: 20, color: c),
-          L.t('history'), HistoryPage()),
+          L.t('weeklyMustSee'), const WeekPage()),      ((c) => Icon(Icons.history_rounded, size: 20, color: c),
+          L.t('history'), const HistoryPage()),
     ];
     return SliverToBoxAdapter(
       child: Padding(
@@ -500,14 +500,14 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
                       const SizedBox(height: 6),
                       const ShimmerBox(height: 14, radius: 4),
                       const SizedBox(height: 4),
-                      FractionallySizedBox(
+                      const FractionallySizedBox(
                         widthFactor: 0.6,
-                        child: const ShimmerBox(height: 11, radius: 4),
+                        child: ShimmerBox(height: 11, radius: 4),
                       ),
                       const SizedBox(height: 6),
-                      FractionallySizedBox(
+                      const FractionallySizedBox(
                         widthFactor: 0.4,
-                        child: const ShimmerBox(height: 11, radius: 4),
+                        child: ShimmerBox(height: 11, radius: 4),
                       ),
                     ],
                   ),

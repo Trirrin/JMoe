@@ -329,9 +329,9 @@ class _WeekPageState extends State<WeekPage> {
                       const SizedBox(height: 6),
                       const ShimmerBox(height: 13, radius: 4),
                       const SizedBox(height: 4),
-                      FractionallySizedBox(
+                      const FractionallySizedBox(
                         widthFactor: 0.6,
-                        child: const ShimmerBox(height: 11, radius: 4),
+                        child: ShimmerBox(height: 11, radius: 4),
                       ),
                     ],
                   ),

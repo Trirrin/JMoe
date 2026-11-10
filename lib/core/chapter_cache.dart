@@ -40,7 +40,7 @@ class ChapterCacheManager {
     required ComicSource source,
     required Comic comic,
     required ReadBundle bundle,
-    int concurrency = 4,
+    int concurrency = 2,
     bool skipIfCached = false,
     bool persistToDisk = false,
     int startPage = 1,
@@ -232,14 +232,19 @@ class ChapterCacheManager {
                     bytes: data,
                     segments: seg,
                     maxWidth: task.decodeWidth,
-                    quality: 88,
+                    quality: 90,
                   );
                 }
-                final img = await ImageCacheManager.decodeScaled(
-                  jpg ?? data,
-                  targetWidth: task.decodeWidth,
-                );
-                if (img != null) ImageCacheManager.instance.putUi(url, img);
+                final hasCache =
+                    ImageCacheManager.instance.getUiSync(url) != null;
+                if (!hasCache) {
+                  await Future<void>.delayed(Duration.zero);
+                  final img = await ImageCacheManager.decodeScaled(
+                    jpg ?? data,
+                    targetWidth: task.decodeWidth,
+                  );
+                  if (img != null) ImageCacheManager.instance.putUi(url, img);
+                }
                 task.doneFlags[i] = true;
               } else {
                 if (needScramble) {
@@ -324,49 +329,6 @@ class ChapterCacheManager {
 
   void _notify() => revision.value++;
 
-  static Future<ui.Image?> unscrambleToImage(
-    Uint8List bytes,
-    int segments, {
-    int? targetWidth,
-  }) async {
-    final src = await ImageCacheManager.decodeScaled(
-      bytes,
-      targetWidth: targetWidth,
-    );
-    if (src == null) return null;
-    if (segments <= 1) return src;
-
-    final w = src.width;
-    final h = src.height;
-    if (h < segments) {
-      return src;
-    }
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    final rem = h % segments;
-    final baseH = h ~/ segments;
-    for (var i = 0; i < segments; i++) {
-      var ch = baseH;
-      var py = baseH * i;
-      final y = h - baseH * (i + 1) - rem;
-      if (i == 0) {
-        ch += rem;
-      } else {
-        py += rem;
-      }
-      canvas.drawImageRect(
-        src,
-        Rect.fromLTWH(0, y.toDouble(), w.toDouble(), ch.toDouble()),
-        Rect.fromLTWH(0, py.toDouble(), w.toDouble(), ch.toDouble()),
-        Paint()..filterQuality = FilterQuality.medium,
-      );
-    }
-    final picture = recorder.endRecording();
-    final out = await picture.toImage(w, h);
-    src.dispose();
-    picture.dispose();
-    return out;
-  }
 
   static Future<Uint8List> unscramble(Uint8List bytes, int segments) async {
     if (segments <= 1) return bytes;
@@ -395,7 +357,7 @@ class ChapterCacheManager {
         src,
         Rect.fromLTWH(0, y.toDouble(), w.toDouble(), ch.toDouble()),
         Rect.fromLTWH(0, py.toDouble(), w.toDouble(), ch.toDouble()),
-        Paint()..filterQuality = FilterQuality.medium,
+        Paint()..filterQuality = FilterQuality.none,
       );
     }
     final picture = recorder.endRecording();

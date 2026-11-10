@@ -98,6 +98,12 @@ function handleReader(call: MethodCallShape, result: ResultShape): void {
   const args: JmoeArgs = new JmoeArgs(call.arguments);
 
   switch (method) {
+    case 'moveToBack':
+      if (abilityContext !== null) {
+        abilityContext.moveAbilityToBackground();
+      }
+      result.success(true);
+      break;
     case 'keepScreenOn':
       setKeepScreenOn(args.on === true, result);
       break;

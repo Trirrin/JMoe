@@ -138,7 +138,7 @@ class _StartupHostPageState extends State<StartupHostPage> {
       for (var idx = 0; idx < imgHosts.length; idx++) {
         _imgResults.add(_HostResult(
           imgHosts[idx],
-          'IMG ${idx + 1}',
+          JmProtocol.localizeHostLabel('线路${idx + 1}', AppState.instance.uiLang),
           null,
           idx + 1,
           isImage: true,
@@ -162,6 +162,10 @@ class _StartupHostPageState extends State<StartupHostPage> {
             final old = _results[i];
             _results[i] = _HostResult(old.host, label, ms, old.order);
           }
+          if (!_userInteracted && ms != null && ms > 0) {
+            final bestSoFar = _currentBest();
+            if (bestSoFar != null) _selected = bestSoFar;
+          }
         });
       }),
       ..._imgResults.map((r) async {
@@ -179,6 +183,10 @@ class _StartupHostPageState extends State<StartupHostPage> {
               isImage: true,
             );
           }
+          if (!_userInteracted && ms != null && ms > 0) {
+            final best = _bestImgNow();
+            if (best != null) _selectedImg = best;
+          }
         });
       }),
     ]);
@@ -187,21 +195,24 @@ class _StartupHostPageState extends State<StartupHostPage> {
     setState(() {
       _testing = false;
       _best = _anyOk
-          ? (_results.where((r) => r.ok).toList()
-                ..sort((a, b) =>
-                    (a.latency ?? 99999).compareTo(b.latency ?? 99999)))
-              .first
+          ? _results
+              .where((r) => r.ok)
+              .reduce((a, b) => (a.latency ?? 99999) <= (b.latency ?? 99999)
+                  ? a
+                  : b)
               .host
           : null;
       _selected = _best;
-      final okImgs = _imgResults.where((r) => r.ok).toList()
-        ..sort((a, b) =>
-            (a.latency ?? 99999).compareTo(b.latency ?? 99999));
-      if (okImgs.isNotEmpty) _selectedImg = okImgs.first.host;
-      _bestImg = okImgs.isNotEmpty ? okImgs.first.host : null;
+      final okImgs = _imgResults.where((r) => r.ok).toList();
+      if (okImgs.isNotEmpty) {
+        final pick = okImgs.reduce((a, b) =>
+            (a.latency ?? 99999) <= (b.latency ?? 99999) ? a : b);
+        _selectedImg = pick.host;
+        _bestImg = pick.host;
+      }
     });
 
-    if (_best != null) {
+    if (_best != null && !_testing) {
       if (AppState.instance.autoEnterStartup) {
         _startCountdown();
       } else {
@@ -226,6 +237,25 @@ class _StartupHostPageState extends State<StartupHostPage> {
         _enter();
       }
     });
+  }
+
+  String? _bestImgNow() {
+    _HostResult? best;
+    for (final r in _imgResults) {
+      if (r.latency == null || r.latency! <= 0) continue;
+      if (best == null || r.latency! < best.latency!) best = r;
+    }
+    return best?.host;
+  }
+
+  String? _currentBest() {
+    _HostResult? best;
+    for (final r in _results) {
+      if (!r.ok) continue;
+      final ms = r.latency ?? 99999;
+      if (best == null || ms < (best.latency ?? 99999)) best = r;
+    }
+    return best?.host;
   }
 
   Future<void> _enter() async {
@@ -289,7 +319,9 @@ class _StartupHostPageState extends State<StartupHostPage> {
     if (_userInteracted) {
       enterLabel = L.t('applyAndEnter');
     } else if (_testing) {
-      enterLabel = L.t('testing');
+      final okCount = _results.where((r) => r.latency != null).length;
+      enterLabel =
+          okCount >= 2 ? L.t('applyAndEnter') : L.t('testing');
     } else if (!_anyOk) {
       enterLabel = L.t('allLinesFailed');
     } else if (_secondsLeft > 0) {
@@ -421,11 +453,8 @@ class _StartupHostPageState extends State<StartupHostPage> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: _entering ||
-                          _selected == null ||
-                          (!_userInteracted && _testing)
-                      ? null
-                      : _enter,
+                  onPressed:
+                      _entering || _selected == null ? null : _enter,
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 15),
                   ),

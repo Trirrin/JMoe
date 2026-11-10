@@ -23,6 +23,12 @@ class JmoeChannelHandler: NSObject {
     let args = call.arguments as? [String: Any] ?? [:]
 
     switch call.method {
+    case "moveToBack":
+      DispatchQueue.main.async {
+        UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
+        result(true)
+      }
+
     case "keepScreenOn":
       let on = args["on"] as? Bool ?? false
       UIApplication.shared.isIdleTimerDisabled = on

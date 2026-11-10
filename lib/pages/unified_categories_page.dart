@@ -393,12 +393,12 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
             height: 42,
             child: ListView(
               scrollDirection: Axis.horizontal,
-              padding: EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               children: [
                 Padding(
-                  padding: EdgeInsets.only(right: 8, top: 6),
+                  padding: const EdgeInsets.only(right: 8, top: 6),
                   child: ChoiceChip(
-                    label: Text(L.t('all'), style: TextStyle(fontSize: 12)),
+                    label: Text(L.t('all'), style: const TextStyle(fontSize: 12)),
                     selected: _currentSub == null,
                     onSelected: (_) {
                       setState(() => _currentSub = null);
@@ -442,7 +442,7 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
               return false;
             },
             child: _items.isEmpty && _listLoading
-                ? Center(child: CircularProgressIndicator())
+                ? const Center(child: CircularProgressIndicator())
                 : _items.isEmpty
                     ? EmptyView(message: L.t('empty'))
                     : AnimatedSwitcher(

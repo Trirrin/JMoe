@@ -17,7 +17,13 @@ class TempStore {
 
   static const int maxTotalBytes = 384 * 1024 * 1024;
 
-  static const Duration idleTtl = Duration(minutes: 30);
+  static const Duration idleTtl = Duration(minutes: 10);
+
+  static const Duration activeTtl = Duration(minutes: 60);
+
+  static const double lowSpaceRatio = 0.15;
+
+  static const int minFreeBytes = 512 * 1024 * 1024;
 
   Directory? _root;
 
@@ -140,13 +146,25 @@ class TempStore {
       final dirs = root.listSync().whereType<Directory>().toList();
       final now = DateTime.now();
 
+      final lowSpace = _isDiskLow();
+
       final alive = <Directory>[];
       for (final d in dirs) {
         final idle = _idleSince[d.path];
-        if (!_locked(d.path) && idle != null) {
-          if (now.difference(idle) > idleTtl) {
-            await remove(d.path);
-            continue;
+
+        if (!_locked(d.path)) {
+          final last = _touched[d.path] ?? idle;
+          if (last != null) {
+            final age = now.difference(last);
+            final limit = lowSpace ? const Duration(minutes: 2) : activeTtl;
+            if (idle != null && age > idleTtl) {
+              await remove(d.path);
+              continue;
+            }
+            if (lowSpace && age > limit) {
+              await remove(d.path);
+              continue;
+            }
           }
         }
         alive.add(d);
@@ -168,8 +186,11 @@ class TempStore {
         ..sort((a, b) => a.$3.compareTo(b.$3));
 
       var total = stats.fold<int>(0, (s, e) => s + e.$2);
+
+      final budget = lowSpace ? maxTotalBytes ~/ 3 : maxTotalBytes;
+
       for (final e in stats) {
-        if (total <= maxTotalBytes) break;
+        if (total <= budget) break;
         if (_locked(e.$1.path)) continue;
         try {
           e.$1.deleteSync(recursive: true);
@@ -181,6 +202,13 @@ class TempStore {
       }
     } catch (_) {}
   }
+
+  bool _isDiskLow() {
+    if (freeBytesHint < 0) return false;
+    return freeBytesHint < minFreeBytes;
+  }
+
+  int freeBytesHint = -1;
 
   Future<void> sweepOnStartup() async {
     try {
