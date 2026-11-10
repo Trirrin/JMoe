@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-/// Kazumi 风格的配色与排版常量。
 class AppStyle {
   AppStyle._();
 
@@ -11,7 +10,6 @@ class AppStyle {
   static const Duration animFast = Duration(milliseconds: 180);
   static const Duration animNormal = Duration(milliseconds: 280);
 
-  /// 默认种子色（Kazumi 默认绿色）
   static const Color seed = Color(0xFF4CAF50);
 
   static const List<Map<String, dynamic>> colorSeeds = [
@@ -57,8 +55,6 @@ ThemeData buildAppTheme(Color seed, Brightness brightness, {bool oled = false}) 
         TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
       },
     ),
-    // 注：Flutter 没有全局「页面过渡时长」开关，时长由各 PageRoute 自己定。
-    // 需要放慢的页面（详情页）在自己的 Route 里设置 duration。
     appBarTheme: AppBarTheme(
       centerTitle: false,
       elevation: 0,

@@ -7,24 +7,15 @@ import '../core/storage_manager.dart';
 import '../core/downloader.dart';
 import '../widgets/reading_calendar.dart';
 
-/// 阅读数据页：只保留**阅读时长统计**。
-///
-/// 书签 / 批注板块已按需求移除（漫画阅读场景用不到划线批注，
-/// 书签也只是多一层噪音）。数据本身仍留在 ReaderStore 里，
-/// 万一以后要恢复展示不需要迁移数据。
 class ReaderDataPage extends StatefulWidget {
-  /// 书籍 id（保留参数位以兼容调用方；当前不影响展示）。
   final String? bookId;
 
-  /// 供外部预热：切到统计页前先把体积数据算好，避免首次进入时
-  /// 「先空后满」的跳变与卡顿。
   static final GlobalKey<State<ReaderDataPage>> statsKey =
       GlobalKey<State<ReaderDataPage>>();
 
   static void precacheNow() {
     final st = statsKey.currentState;
     if (st == null) return;
-    // ignore: avoid_dynamic_calls
     (st as dynamic).precacheStorage();
   }
 
@@ -35,19 +26,11 @@ class ReaderDataPage extends StatefulWidget {
 }
 
 class _ReaderDataPageState extends State<ReaderDataPage> {
-  /// 存储占用（分类）
   List<StorageSlice> _storageSlices = const [];
   int _storageTotal = 0;
 
-  /// 上次可见性，用于「切回本页时刷新数据」
   bool _lastVisible = true;
 
-  /// 存储明细是否已就绪。
-  ///
-  /// 之前 `_storageSlices` 一开始是空数组，异步返回后才插入到列表里，
-  /// 于是「切到统计页」时会先看到短内容、几十毫秒后又被撑长 ——
-  /// 视觉上就是内容「跳一下」。现在未就绪时不渲染该区块（保留固定占位），
-  /// 就绪后一次性画出来，不再跳。
   bool _storageReady = false;
 
   @override
@@ -70,7 +53,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
     }
   }
 
-  /// 供外部预热调用（见 [ReaderDataPage.precacheNow]）。
   Future<void> precacheStorage() => _loadStorage();
 
   String _fmtBytes(int bytes) {
@@ -85,10 +67,8 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Offstage 会切换 TickerMode；从隐藏变为可见时刷新一次
     final visible = TickerMode.of(context);
     if (visible && !_lastVisible) {
-      // 让出一帧再刷新，避免 build 期间 setState
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() {});
       });
@@ -106,7 +86,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      // 刷新按钮已移除：本页为统计展示，进入/切回即刷新，手上不需要按钮。
       appBar: AppBar(title: Text(L.t('readingStats'))),
       body: RefreshIndicator(
         onRefresh: () async => setState(() {}),
@@ -122,13 +101,11 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
 
     return ListView(
       key: const PageStorageKey('stats_scroll'),
-      // 可下拉刷新：内容不满一屏时也能拉
       physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
-        // ---- 总览 ----
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -177,7 +154,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
           ),
         ),
 
-        // ---- 三大板块分区 ----
         const SizedBox(height: 20),
         _buildTypeSection(
           theme,
@@ -203,16 +179,11 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
           unit: L.t('unitVideo'),
         ),
 
-        // ---- 阅读日历 ----
-        //
-        // 三个板块合并展示：每天读了多少时间一目了然。
-        // 圆形格子 + 颜色深浅表示活跃度，与签到日历风格一致。
         const SizedBox(height: 20),
         _sectionTitle(theme, L.t('readingCalendar')),
         const SizedBox(height: 8),
         ReadingCalendar(daily: st.mergedDaily),
 
-        // ---- 缓存 ----
         const SizedBox(height: 20),
         _sectionTitle(theme, L.t('cacheStats')),
         const SizedBox(height: 8),
@@ -267,7 +238,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
           ),
         ),
 
-        // ---- 下载与缓存 ----
         const SizedBox(height: 20),
         _sectionTitle(theme, L.t('downloadAndCache')),
         const SizedBox(height: 8),
@@ -280,7 +250,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 下载与离线资源
               Row(
                 children: [
                   Icon(Icons.download_rounded,
@@ -295,9 +264,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
                 ],
               ),
               const SizedBox(height: 6),
-              // 离线资源明细：下载章节 / 导入包 / 小说缓存 / 视频缓存。
-              // 用户要求「统计也需要计算离线资源」——
-              // 之前这一块只统计在线阅读，离线看的内容完全不计入。
               Builder(
                 builder: (context) {
                   final tasks = ChapterDownloader.allTasks;
@@ -322,8 +288,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
                 },
               ),
               const SizedBox(height: 12),
-              // 存储占用明细：未采集完时显示固定高度的占位，
-              // 就绪后一次性替换 —— 避免「先短后长」导致的跳变。
               if (!_storageReady)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 10),
@@ -404,7 +368,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
           ),
         ),
 
-        // ---- 收藏 / 历史 ----
         const SizedBox(height: 20),
         Row(
           children: [
@@ -466,7 +429,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
     );
   }
 
-  /// 单个板块的统计卡片：时长 / 今日 / 本篇数 / 页数 / 7 日曲线
   Widget _buildTypeSection(
     ThemeData theme, {
     required StatType type,
@@ -479,7 +441,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
     final week = t.last7Days;
     final maxSec = week.fold<int>(1, (a, b) => b.seconds > a ? b.seconds : a);
 
-    // 该板块无任何数据时也显示，只是数值为 0（便于用户知道有这一栏）
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
@@ -489,7 +450,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 标题行
           Row(
             children: [
               Icon(icon, size: 18, color: scheme.primary),
@@ -503,7 +463,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
             ],
           ),
           const SizedBox(height: 10),
-          // 四个数字
           Row(
             children: [
               Expanded(
@@ -525,7 +484,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
             ],
           ),
           const SizedBox(height: 10),
-          // 7 日曲线
           SizedBox(
             height: 44,
             child: Row(
@@ -596,7 +554,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
     );
   }
 
-
   Widget _sectionTitle(ThemeData theme, String text) {
     return Row(
       children: [
@@ -618,7 +575,6 @@ class _ReaderDataPageState extends State<ReaderDataPage> {
       ],
     );
   }
-
 
   Widget _statCard(
     ThemeData theme, {

@@ -7,7 +7,6 @@ import '../core/l10n.dart';
 import '../widgets/common_widgets.dart';
 import 'unified_home_page.dart';
 
-/// 语言管理页：集中管理「界面语言」与「内容语言」，一处完成，不再分散。
 class LanguagePage extends StatefulWidget {
   const LanguagePage({super.key});
 
@@ -16,18 +15,12 @@ class LanguagePage extends StatefulWidget {
 }
 
 class _LanguagePageState extends State<LanguagePage> {
-  /// 界面语言（本地文案）。
-  ///
-  /// 第三项是**副标题**：必须让用户看出是哪种语言本身，
-  /// 所以统一用该语言的**自称**（简体中文 / 繁體中文 / English），
-  /// 不要写 "Simplified Chinese" 这种英文解释，更不要显示 `zh-Hans`。
   static List<(String, String, String)> get _uiOptions => [
     ('zh-Hans', L.t('langZhHans'), '简体中文'),
     ('zh-Hant', L.t('langZhHant'), '繁體中文'),
     ('en', 'English', 'English'),
   ];
 
-  /// 内容语言（服务端返回内容的字形）
   static List<(String, String, String)> get _contentOptions => [
     ('CN', L.t('langZhHans'), '简体中文'),
     ('TW', L.t('langZhHant'), '繁體中文'),
@@ -46,7 +39,6 @@ class _LanguagePageState extends State<LanguagePage> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 32),
         children: [
-          // ---------------- 界面语言 ----------------
           SectionHeader(title: L.t('uiLanguage')),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
@@ -96,7 +88,6 @@ class _LanguagePageState extends State<LanguagePage> {
             ),
           ),
 
-          // ---------------- 内容语言 ----------------
           SectionHeader(title: L.t('contentLang')),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
@@ -140,7 +131,6 @@ class _LanguagePageState extends State<LanguagePage> {
                   onTap: () async {
                     await state.setLang(o.$1);
                     JmApi.instance.lang = o.$1;
-                    // 清空首页缓存，让新语言内容立即生效
                     UnifiedHomePageState.clearCache();
                     if (mounted) {
                       setState(() {});

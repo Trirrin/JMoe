@@ -7,9 +7,6 @@ import '../core/downloader.dart';
 import '../core/jmoe_archive.dart';
 import '../core/l10n.dart';
 
-/// 阅读一个 `.jmoe` 加密包（离线，逐页解密）。
-///
-/// 与在线阅读器保持一致的交互：点按切换 UI、左右翻页、缩放手势。
 class JmoeArchiveReaderPage extends StatefulWidget {
   const JmoeArchiveReaderPage({
     super.key,
@@ -22,7 +19,6 @@ class JmoeArchiveReaderPage extends StatefulWidget {
   final String title;
   final Map<String, dynamic> meta;
 
-  /// 打开某目录（复用下载器里的原生能力）。
   static Future<bool> openFolder(String path) =>
       ChapterDownloader.openFolder(path);
 
@@ -38,7 +34,6 @@ class _JmoeArchiveReaderPageState extends State<JmoeArchiveReaderPage> {
   bool _showUi = true;
   final _ctrl = PageController();
 
-  /// 包内章节 id（用于派生解密密钥）
   String get _chapterId => '${widget.meta['chapterId'] ?? widget.title}';
 
   @override
@@ -75,7 +70,6 @@ class _JmoeArchiveReaderPageState extends State<JmoeArchiveReaderPage> {
   @override
   Widget build(BuildContext context) {
     final pages = _pages;
-    // 作品信息（来自包内 albumMeta），有就展示在顶栏下方
     final albumTitle = '${widget.meta['albumName'] ?? widget.meta['title'] ?? ''}';
     final author = '${widget.meta['author'] ?? ''}';
     return Scaffold(
@@ -137,7 +131,6 @@ class _JmoeArchiveReaderPageState extends State<JmoeArchiveReaderPage> {
                         ),
                       ),
           ),
-          // 顶栏
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
@@ -179,7 +172,6 @@ class _JmoeArchiveReaderPageState extends State<JmoeArchiveReaderPage> {
                             fontSize: 14,
                           ),
                         ),
-                        // 作品名 / 作者（来自包内元数据）
                         if (albumTitle.isNotEmpty || author.isNotEmpty)
                           Text(
                             [
@@ -230,7 +222,6 @@ class _JmoeArchiveReaderPageState extends State<JmoeArchiveReaderPage> {
               ),
             ),
           ),
-          // 底栏：页码
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,

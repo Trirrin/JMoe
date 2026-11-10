@@ -3,9 +3,6 @@ import 'package:flutter/material.dart';
 import '../core/l10n.dart';
 import '../core/reader_settings.dart';
 
-/// 小说排版设置面板。
-///
-/// 从 `novel_pages.dart` 抽出，只负责滑块与选项渲染。
 class NovelTypographySheet extends StatelessWidget {
   const NovelTypographySheet({
     super.key,
@@ -18,7 +15,6 @@ class NovelTypographySheet extends StatelessWidget {
   final ReaderSettings settings;
   final ReaderTheme theme;
 
-  /// 任一参数变化后回调（用于让阅读器重排）
   final VoidCallback onChanged;
   final VoidCallback onOpenPageMode;
 
@@ -39,7 +35,6 @@ class NovelTypographySheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            // 翻页模式入口
             OutlinedButton.icon(
               onPressed: onOpenPageMode,
               icon: Icon(
@@ -111,7 +106,6 @@ class NovelTypographySheet extends StatelessWidget {
               (v) => settings.update(() => settings.indent = v),
             ),
             const SizedBox(height: 6),
-            // 字重
             _chips(
               L.t('fontWeight'),
               ['常规', '中等', '粗体'],
@@ -119,7 +113,6 @@ class NovelTypographySheet extends StatelessWidget {
               (i) => settings.update(() => settings.weightIndex = i),
             ),
             const SizedBox(height: 10),
-            // 字体
             _chips(
               L.t('fontFamily'),
               ['默认', '衬线'],
@@ -127,7 +120,6 @@ class NovelTypographySheet extends StatelessWidget {
               (i) => settings.update(() => settings.fontIndex = i),
             ),
             const SizedBox(height: 10),
-            // 对齐
             _alignChips(),
           ],
         ),

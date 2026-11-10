@@ -7,7 +7,6 @@ import '../core/novel_cache.dart';
 import '../core/temp_store.dart';
 import '../widgets/common_widgets.dart';
 
-/// 缓存管理页：占用统计、容量上限、保留时长、清理操作、已缓存章节列表。
 class CachePage extends StatefulWidget {
   const CachePage({super.key});
 
@@ -74,7 +73,6 @@ class _CachePageState extends State<CachePage> {
 
     return Scaffold(
       appBar: AppBar(
-        // 刷新按钮已移除：改为下拉刷新，入口统一
         title: Text(L.t('cacheManage')),
       ),
       body: _loading
@@ -88,7 +86,6 @@ class _CachePageState extends State<CachePage> {
               ),
               padding: const EdgeInsets.only(bottom: 32),
               children: [
-                // 占用卡片
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
                   child: Container(
@@ -181,7 +178,6 @@ class _CachePageState extends State<CachePage> {
                 ),
 
                 SectionHeader(title: L.t('cacheCapacitySection')),
-                // 最大容量
                 ListTile(
                   leading: const Icon(Icons.straighten_rounded),
                   title: Text(L.t('cacheMaxSize')),
@@ -193,7 +189,6 @@ class _CachePageState extends State<CachePage> {
                   trailing: const Icon(Icons.chevron_right, size: 18),
                   onTap: () => _pickSize(cm),
                 ),
-                // 保留时长
                 ListTile(
                   leading: const Icon(Icons.schedule_rounded),
                   title: Text(L.t('cacheRetention')),
@@ -310,7 +305,6 @@ class _CachePageState extends State<CachePage> {
                     L.t('clearAllCache'),
                     style: TextStyle(color: scheme.error),
                   ),
-                  // 正向说明「删什么」，不列举「保留什么」（那样反而误导）
                   subtitle: Text(L.t('clearAllCacheDesc')),
                   onTap: () async {
                     final ok = await showDialog<bool>(
@@ -380,8 +374,6 @@ class _CachePageState extends State<CachePage> {
                         onPressed: () async {
                           final parts = key.split(':');
                           if (parts.length == 2) {
-                            // 只清这一章：不能调 clearAll（那会连全部
-                            // 章节 + 所有图片缓存一起清空）
                             ChapterCacheManager.instance
                                 .cancelTask(parts[0], parts[1]);
                             final urls =

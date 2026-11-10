@@ -4,14 +4,6 @@ import '../core/reader_paginator.dart';
 import '../core/reader_settings.dart';
 import '../core/reader_store.dart';
 
-/// 小说正文渲染与交互层。
-///
-/// 从 `novel_pages.dart`（原 2100+ 行）抽出的**正文展示**职责：
-/// - 分页模式：单页 SelectableText + 左右滑动翻页
-/// - 滚动模式：整章连续滚动 + 到底自动续读
-/// - 文本选择菜单、高亮批注
-///
-/// 不持有加载/缓存/统计逻辑，全部通过回调交给页面。
 class NovelTextView extends StatelessWidget {
   const NovelTextView({
     super.key,
@@ -38,17 +30,14 @@ class NovelTextView extends StatelessWidget {
   final ReaderSettings settings;
   final ReaderTheme theme;
 
-  /// 全文（可能含多章合并内容）
   final String pageSource;
 
-  /// 分页结果
   final List<PageSlice> pages;
   final int currentPage;
 
   final ScrollController scrollController;
   final double scrollRatio;
 
-  /// 当前页范围内的批注/高亮
   final List<({int start, int end, Color color, bool underline})>
       highlightRanges;
 
@@ -57,7 +46,6 @@ class NovelTextView extends StatelessWidget {
   final ValueChanged<TextSelection> onSelectionChanged;
   final Widget Function(BuildContext, EditableTextState) onContextMenu;
 
-  /// 滚动接近底部（自动续读）
   final void Function(double pixels, double maxExtent) onScrollNearBottom;
   final ValueChanged<double> onScrollRatioChanged;
 
@@ -72,8 +60,6 @@ class NovelTextView extends StatelessWidget {
         ? _buildScroll(context)
         : _buildPaged(context);
   }
-
-  // ---------------- 滚动模式 ----------------
 
   Widget _buildScroll(BuildContext context) {
     return NotificationListener<ScrollNotification>(
@@ -101,8 +87,6 @@ class NovelTextView extends StatelessWidget {
     );
   }
 
-  // ---------------- 分页模式 ----------------
-
   Widget _buildPaged(BuildContext context) {
     if (pages.isEmpty) {
       return Center(
@@ -127,11 +111,6 @@ class NovelTextView extends StatelessWidget {
       child: _text(context, seg, highlightRanges),
     );
 
-    // 分页模式的手势：
-    // - 横向滑动 → 翻页
-    // - 点左侧 1/4 → 上一页
-    // - 点右侧 1/4 → 下一页
-    // - 点中间 → 呼出菜单
     return _TapDetector(
       onTapAt: (pos, width) {
         if (pos < width * 0.25) {
@@ -157,9 +136,7 @@ class NovelTextView extends StatelessWidget {
     );
   }
 
-  /// 统一的内容内边距：顶部含状态栏，底部含进度栏高度。
   EdgeInsets _contentPadding(BuildContext context) {
-    // 状态栏由外层 SafeArea 处理，这里只留正常边距
     return EdgeInsets.fromLTRB(
       settings.marginH,
       settings.marginV,
@@ -187,12 +164,6 @@ class NovelTextView extends StatelessWidget {
   }
 }
 
-
-/// 只把「真正的点击」识别为 tap，并上报点击位置。
-///
-/// 直接用 Listener.onPointerUp 会在滑动结束时也触发，
-/// 导致一滑动就弹出菜单。这里记录按下与抬起的位移，
-/// 超过阈值视为拖动，不触发点击。
 class _TapDetector extends StatefulWidget {
   const _TapDetector({
     this.onTap,
@@ -200,10 +171,8 @@ class _TapDetector extends StatefulWidget {
     required this.child,
   });
 
-  /// 简单点击回调（不需要位置时用）
   final VoidCallback? onTap;
 
-  /// 带位置的点击回调：pos = 局部 x 坐标，width = 控件宽度
   final void Function(double pos, double width)? onTapAt;
 
   final Widget child;
@@ -214,7 +183,7 @@ class _TapDetector extends StatefulWidget {
 
 class _TapDetectorState extends State<_TapDetector> {
   Offset? _downAt;
-  static const double _slop = 12; // 允许的手指抖动
+  static const double _slop = 12;
 
   @override
   Widget build(BuildContext context) {
@@ -227,11 +196,10 @@ class _TapDetectorState extends State<_TapDetector> {
             final d = _downAt;
             _downAt = null;
             if (d == null) return;
-            if ((e.position - d).distance > _slop) return; // 拖动，不算点击
+            if ((e.position - d).distance > _slop) return;
 
             final at = widget.onTapAt;
             if (at != null) {
-              // 用全局坐标减去控件左上角，得到局部 x
               final box = context.findRenderObject() as RenderBox?;
               final local = box?.globalToLocal(e.position).dx ?? 0;
               at(local, constraints.maxWidth);

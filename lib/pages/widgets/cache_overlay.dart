@@ -4,12 +4,6 @@ import '../../core/app_state.dart';
 import '../../core/chapter_cache.dart';
 import '../../core/l10n.dart';
 
-/// 整章缓存蒙版：模糊封面背景 + 统一进度条 + xx/xx。
-///
-/// 提供三种选择：
-///  * 等待缓存完成（默认，进度到 100% 自动消失）
-///  * 边看边缓存（立即进入阅读）
-///  * 取消缓存
 class CacheOverlay extends StatefulWidget {
   final ChapterCacheTask task;
   final VoidCallback onWait;
@@ -29,10 +23,6 @@ class CacheOverlay extends StatefulWidget {
 }
 
 class _CacheOverlayState extends State<CacheOverlay> {
-  /// 「今天不再询问」
-  ///
-  /// 勾选后点「边看边缓存」→ 记录到本地（按日期），当天后续进入阅读
-  /// 都直接边看边缓存，不再弹这个蒙版。次日自动失效。
   bool _rememberToday = false;
 
   @override
@@ -50,7 +40,6 @@ class _CacheOverlayState extends State<CacheOverlay> {
   void _tick() {
     if (!mounted) return;
     setState(() {});
-    // 缓存完成 → 自动关闭蒙版并进入阅读
     if (widget.task.isCompleted) {
       widget.onWait();
     }
@@ -100,7 +89,6 @@ class _CacheOverlayState extends State<CacheOverlay> {
                 ),
               ),
               const SizedBox(height: 20),
-              // 明显进度条
               ClipRRect(
                 borderRadius: BorderRadius.circular(3),
                 child: LinearProgressIndicator(
@@ -134,7 +122,6 @@ class _CacheOverlayState extends State<CacheOverlay> {
                 ],
               ),
               const SizedBox(height: 24),
-              // 「今天不再询问」：勾选后当天都直接边看边缓存
               InkWell(
                 onTap: () => setState(() => _rememberToday = !_rememberToday),
                 borderRadius: BorderRadius.circular(8),

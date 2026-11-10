@@ -14,27 +14,15 @@ import '../core/jm_source.dart';
 import '../core/models.dart';
 import 'unified_reader_page.dart';
 
-/// 下载列表的排序方式。
 enum DownloadSort {
-  /// 默认：按名称（作品名 → 章节名）
   name,
 
-  /// 按下载时间（最新在前）
   time,
 }
 
-/// 我的下载：三个板块**始终显示**（下载中 / 暂停中 / 已完成），
-/// 有任务时标题带数量 `下载中 (3)`，没有任务时不带括号。
-///
-/// 顶部有一行引导，告诉用户「点章节进去看离线」——
-/// 之前没有任何提示，用户不知道点了会怎样。
 class DownloadsPage extends StatefulWidget {
   const DownloadsPage({super.key, this.embedded = false});
 
-  /// 是否作为 Tab 内容嵌入 [DownloadsHubPage]。
-  ///
-  /// true 时不渲染自己的 Scaffold/AppBar（外层已有），
-  /// 排序与清空按钮移到页面顶部的一行工具条里。
   final bool embedded;
 
   @override
@@ -44,27 +32,18 @@ class DownloadsPage extends StatefulWidget {
 class DownloadsPageState extends State<DownloadsPage> {
   Timer? _ticker;
 
-  /// 排序方式：
-  ///  * [DownloadSort.name] 默认，按名称排序（作品与选集都按名称）
-  ///  * [DownloadSort.time] 按下载时间排序（作品与选集都用下载时间）
   DownloadSort _sort = DownloadSort.name;
 
-  // ---- 供 DownloadsHubPage 的操作按钮使用 ----
-
-  /// 当前排序方式
   DownloadSort get sortMode => _sort;
 
-  /// 是否有已完成项（决定「清空」按钮是否显示）
   bool get hasCompleted =>
       ChapterDownloader.allTasks.any((t) => t.done);
 
-  /// 切换排序
   void setSort(DownloadSort v) {
     if (v == _sort) return;
     setState(() => _sort = v);
   }
 
-  /// 清空已完成项（带确认对话框）
   void clearCompleted() => _onClear(Theme.of(context));
 
   @override
@@ -81,11 +60,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     super.dispose();
   }
 
-  /// 按当前排序规则整理列表。
-  ///
-  ///  * [DownloadSort.name]（默认）：作品按名称、作品内选集按**原名顺序**
-  ///    （第一话 → 最后一话），符合「按名称排序」的直觉
-  ///  * [DownloadSort.time]：作品与选集**都按下载时间**倒序
   List<DownloadTask> _sorted(List<DownloadTask> list) {
     final copy = List<DownloadTask>.from(list);
     switch (_sort) {
@@ -93,13 +67,10 @@ class DownloadsPageState extends State<DownloadsPage> {
         copy.sort((a, b) {
           final c = a.albumName.compareTo(b.albumName);
           if (c != 0) return c;
-          // 作品内保持默认顺序（章节名自然序，第一话在前）
           return _naturalCompare(a.chapterName, b.chapterName);
         });
       case DownloadSort.time:
         copy.sort((a, b) {
-          // 先按作品的整体下载时间（取该作品最新的那次），
-          // 再按集次的下载时间，保证「作品与选集都用下载时间」
           final at = a.finishedAt ?? a.startedAt;
           final bt = b.finishedAt ?? b.startedAt;
           final c = bt.compareTo(at);
@@ -110,8 +81,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     return copy;
   }
 
-  /// 自然序比较：让「第 2 话」排在「第 10 话」前面
-  /// （纯字符串比较会把 10 排到 2 前面）。
   static int _naturalCompare(String a, String b) {
     final ra = RegExp(r'\d+').allMatches(a).map((m) => m.group(0)!).toList();
     final rb = RegExp(r'\d+').allMatches(b).map((m) => m.group(0)!).toList();
@@ -129,15 +98,11 @@ class DownloadsPageState extends State<DownloadsPage> {
     final scheme = theme.colorScheme;
     final tasks = ChapterDownloader.allTasks;
 
-    // 按当前排序规则整理（作品与选集都用同一套规则）
-    // 进行中（含暂停）：暂停的任务也放这里，靠行内播放/暂停按钮区分
     final running = _sorted(
       tasks.where((t) => !t.done).toList(),
     );
     final done = _sorted(tasks.where((t) => t.done).toList());
 
-    // 排序与清空（嵌入模式由 DownloadsHubPage 放在 Tab 栏右侧，
-    // 独立模式放 AppBar）。
     final toolbar = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -186,7 +151,6 @@ class DownloadsPageState extends State<DownloadsPage> {
             32,
           ),
           children: [
-            // ---- 引导：点章节即可离线阅读 ----
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
@@ -215,10 +179,6 @@ class DownloadsPageState extends State<DownloadsPage> {
               ),
             ),
             const SizedBox(height: 4),
-            // ---- 两个板块：进行中（含暂停） / 已完成 ----
-            //
-            // 用户要求：不再单独分「暂停中」，暂停的与下载中的放在一起，
-            // 靠每行右侧的播放/暂停按钮区分状态即可。
             _sectionHeader(theme, L.t('downloadsRunning'), running.length,
                 Icons.downloading_rounded, scheme.primary),
             if (running.isEmpty)
@@ -235,11 +195,6 @@ class DownloadsPageState extends State<DownloadsPage> {
         ),
     );
 
-    // 嵌入模式：不套 Scaffold（外层 DownloadsHubPage 已有），
-    // 排序/清空放到页面顶部一行工具条。
-    // 嵌入模式：直接返回内容（排序/清空由外层 DownloadsHubPage
-    // 放在 Tab 栏右侧，不再额外占一行 ——
-    // 之前多了一行工具条把整个列表往下推，用户反馈"整体下移了"）。
     if (widget.embedded) {
       return bodyContent;
     }
@@ -253,7 +208,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     );
   }
 
-  /// 板块标题：有任务时 `下载中 (3)`，没有任务时只有 `下载中`。
   Widget _sectionHeader(
     ThemeData theme,
     String title,
@@ -305,12 +259,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     return groups.values.map((g) => _buildGroup(theme, g)).toList();
   }
 
-  /// 清除任务：**先确认**，并让用户选择是否同时删文件。
-  ///
-  /// 之前是点一下立刻 clearFinished，既没有确认，也没有任何反馈，
-  /// 还会被误认为「文件也删了」。现在：
-  ///  * 「清除任务」= 只移除列表记录，磁盘文件保留
-  ///  * 勾选「同时删除文件」才会真删
   Future<void> _onClear(ThemeData theme) async {
     var alsoDeleteFiles = false;
     final ok = await showDialog<bool>(
@@ -359,14 +307,12 @@ class DownloadsPageState extends State<DownloadsPage> {
     );
     if (ok != true) return;
 
-    // 收集要处理的已完成任务
     final doneList = ChapterDownloader.allTasks.where((t) => t.done).toList();
     if (alsoDeleteFiles) {
       for (final t in doneList) {
         await ChapterDownloader.deleteBy(t.sourceId, t.chapterId);
       }
     } else {
-      // 只清记录：把 savedPath 留下来也没用（记录没了），所以直接清列表
       ChapterDownloader.clearFinished();
     }
     if (!mounted) return;
@@ -466,8 +412,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     );
   }
 
-  /// 选集行：**点击进入离线阅读**（行尾不再放 ✓ 图标 ——
-  /// 选中/未选中已经有左侧状态图标与颜色区分，再加一个勾是重复信息）。
   Widget _buildChapterRow(ThemeData theme, DownloadTask t) {
     final scheme = theme.colorScheme;
     final pct = t.total <= 0 ? 0.0 : t.completed / t.total;
@@ -476,9 +420,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     return InkWell(
       onTap: canOpen
           ? () async {
-              // 复用在线阅读器（数据源换成磁盘目录），界面/手势/进度一致。
-              // 需要构造一个最小 Comic/Chapter 以复用阅读器，
-              // 并用归一化后的 id 读回上次进度。
               final comic = Comic(
                 id: t.albumId,
                 name: t.albumName,
@@ -595,7 +536,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     );
   }
 
-  /// 长按 / 更多：打开目录、分享、删除。
   Future<void> _showActions(ThemeData theme, DownloadTask t) async {
     final scheme = theme.colorScheme;
     final canOpen = t.done && t.savedPath != null;
@@ -658,25 +598,12 @@ class DownloadsPageState extends State<DownloadsPage> {
     );
   }
 
-  /// 把该章打包为 `.jmoe` 并分享。
-  ///
-  /// 用户要求：下载下来的是无加密包（明文图片目录），
-  /// **只有分享**时才生成加密的 `.jmoe`，并且包里带上作品数据，
-  /// 这样对方导入后能直接看到详情并阅读。
   Future<void> _shareAsArchive(DownloadTask t) async {
     final dirPath = t.savedPath;
     if (dirPath == null) return;
-    // **先给反馈**：打包要逐页加密，大章节需要几秒。
-    // 之前没有任何提示，用户以为卡死。
     _showPackingDialog();
     final name = (t.chapterName.isEmpty ? t.albumName : t.chapterName)
         .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    // 打包产物放在应用缓存目录（path_provider 的 getTemporaryDirectory）。
-    //
-    // 它在 Android 上返回 /data/user/0/<pkg>/cache，对应 file_paths.xml
-    // 里声明的 <cache-path>，FileProvider 一定能转成 content:// URI。
-    // 之前用 Directory.systemTemp，在部分 ROM 上得到的路径不在
-    // FileProvider 白名单内 → getUriForFile 抛异常 → 分享面板弹不出来。
     Directory? tmp;
     try {
       final base = await getTemporaryDirectory();
@@ -707,7 +634,6 @@ class DownloadsPageState extends State<DownloadsPage> {
       chapterId: t.chapterId,
       outPath: outPath,
       albumMeta: albumMeta,
-      // 后台打包，进度通过 SendPort 回传到这里刷新 UI
       onProgress: (done, total) {
         _packDone.value = done;
         _packTotal.value = total;
@@ -724,10 +650,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     await ChapterDownloader.shareFile(packed.path);
   }
 
-  /// 打包进度对话框。
-  ///
-  /// 文字**居中**（之前 Row + Expanded 会把文字顶到左上，
-  /// 用户看到「文字不在控件中居中」），并且显示真实页数进度。
   void _showPackingDialog() {
     _packDone.value = 0;
     _packTotal.value = 0;
@@ -753,7 +675,6 @@ class DownloadsPageState extends State<DownloadsPage> {
                 style: const TextStyle(fontSize: 14),
               ),
               const SizedBox(height: 8),
-              // 进度：xx / xx 页
               ValueListenableBuilder<int>(
                 valueListenable: _packTotal,
                 builder: (context, total, _) => total <= 0
@@ -779,7 +700,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     );
   }
 
-  /// 打包进度（后台打包时由 worker 回传）
   final _packDone = ValueNotifier<int>(0);
   final _packTotal = ValueNotifier<int>(0);
 

@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// 统一的标签胶囊（`#tag` 样式）。
-///
-/// 全圆角 + 实心浅底色，点击回调由调用方决定。
 class TagChip extends StatelessWidget {
   final String tag;
   final VoidCallback? onTap;
@@ -75,7 +72,6 @@ class _PressableChipState extends State<_PressableChip> {
   }
 }
 
-/// 可删除的标签胶囊（搜索历史用）。
 class RemovableTagChip extends StatelessWidget {
   final String tag;
   final VoidCallback onTap;

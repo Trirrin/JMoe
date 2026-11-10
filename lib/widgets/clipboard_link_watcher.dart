@@ -10,14 +10,6 @@ import '../pages/unified_detail_page.dart';
 import '../pages/unified_home_page.dart';
 import 'app_toast.dart';
 
-/// 剪贴板分享链接探测：App 回到前台时读一次剪贴板，
-/// 若含 JM 作品链接就弹出面板询问是否跳转。
-///
-/// 规则（用户要求）：
-///  * **无论当前在哪个页面**都要弹
-///  * 同意 → 跳转到对应作品详情
-///  * 拒绝（点「取消」/ 点空白处关闭）→ **同一链接不再提示**
-///  * 已处理过的链接持久化记录，避免重复骚扰
 class ClipboardLinkWatcher extends StatefulWidget {
   const ClipboardLinkWatcher({super.key, required this.child});
 
@@ -29,19 +21,15 @@ class ClipboardLinkWatcher extends StatefulWidget {
 
 class _ClipboardLinkWatcherState extends State<ClipboardLinkWatcher>
     with WidgetsBindingObserver {
-  /// 已处理过（同意过或拒绝过）的链接，持久化到本地。
   final Set<String> _handled = {};
 
-  /// 正在展示面板（避免重复弹）
   bool _showing = false;
-
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadHandled();
-    // 冷启动后检查一次（延迟到首帧之后，确保 Navigator 已就绪）
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await Future<void>.delayed(const Duration(milliseconds: 700));
       if (mounted) _checkClipboard();
@@ -56,7 +44,6 @@ class _ClipboardLinkWatcherState extends State<ClipboardLinkWatcher>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 每次回到前台都检查（用户可能在别处复制了新链接）
     if (state == AppLifecycleState.resumed) {
       _checkClipboard();
     }
@@ -77,29 +64,19 @@ class _ClipboardLinkWatcherState extends State<ClipboardLinkWatcher>
     } catch (_) {}
   }
 
-  /// 从文本中提取 JM 作品 id。
-  ///
-  /// 支持的形态：
-  ///  * https://18comic.vip/album/123456/xxx
-  ///  * https://18comic.org/comic/123456/
-  ///  * https://jmcomic.me/album/123456
-  ///  * 纯数字的 JM 号（123456）
   static String? _extractAlbumId(String text) {
     final t = text.trim();
     if (t.isEmpty || t.length > 2000) return null;
-    // 链接里的 album / comic / photo 段
     final m = RegExp(
       r'(?:album|comic|photo)/(\d+)',
       caseSensitive: false,
     ).firstMatch(t);
     if (m != null) return m.group(1);
-    // 形如 jm123456
     final jm = RegExp(r'\bjm(\d{4,})\b', caseSensitive: false).firstMatch(t);
     if (jm != null) return jm.group(1);
     return null;
   }
 
-  /// 判断是否像一个可识别的分享链接（避免把普通数字当链接）。
   static bool _looksLikeLink(String text) {
     final t = text.trim();
     if (!t.contains('://') && !t.toLowerCase().contains('jm')) return false;
@@ -132,18 +109,15 @@ class _ClipboardLinkWatcherState extends State<ClipboardLinkWatcher>
   }
 
   Future<void> _showPrompt(String rawText, String albumId) async {
-    // 用 showModalBottomSheet：点空白处关闭 = 视为拒绝
     final accepted = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      // 点空白处关闭 → 返回 null → 视为拒绝
       builder: (ctx) => _LinkPromptSheet(
         rawText: rawText,
         albumId: albumId,
       ),
     );
-    // 无论同意还是拒绝，都记入「已处理」，同一链接不再提示
     _handled.add(rawText);
     await _saveHandled();
     if (accepted == true && mounted) {
@@ -187,7 +161,6 @@ class _ClipboardLinkWatcherState extends State<ClipboardLinkWatcher>
   Widget build(BuildContext context) => widget.child;
 }
 
-/// 询问面板：是否打开剪贴板里的作品。
 class _LinkPromptSheet extends StatelessWidget {
   const _LinkPromptSheet({
     required this.rawText,
@@ -251,7 +224,6 @@ class _LinkPromptSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            // 链接预览（限制两行，避免长链接撑爆）
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(
@@ -286,7 +258,6 @@ class _LinkPromptSheet extends StatelessWidget {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    // 拒绝 → 返回 false，同一链接不再提示
                     onPressed: () => Navigator.pop(context, false),
                     child: Text(L.t('clipboardLinkLater')),
                   ),
@@ -317,14 +288,9 @@ class _LinkPromptSheet extends StatelessWidget {
   }
 }
 
-/// 按 id 拉取作品信息的小工具（供剪贴板跳转用）。
 class JmServiceHelper {
   JmServiceHelper._();
 
-  /// 通过作品 id 获取 Comic 详情；失败返回 null。
-  ///
-  /// 剪贴板只有一个 id，没有标题/封面，所以先用最小 Comic 占位，
-  /// 再让源的 detail() 去补全（详情页本身也会再拉一次，数据一致）。
   static Future<Comic?> fetchComicById(String id) async {
     try {
       final stub = Comic(
@@ -335,7 +301,6 @@ class JmServiceHelper {
         source: 'jm',
       );
       final info = await JmSource.instance.detail(stub);
-      // detail() 返回 DetailInfo，里面带回完整的 Comic
       return info.comic;
     } catch (_) {
       return null;

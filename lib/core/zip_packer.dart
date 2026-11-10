@@ -6,20 +6,6 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// 下载内容的**本地打包器**：把图片目录收拢成一个**无加密 zip**。
-///
-/// # 为什么本地用 zip、分享用 .jmoe
-///
-///  * **本地存储**：用标准 zip（不加密）。用户可以自己用任何解压工具
-///    打开、取出图片，符合"下载下来的文件应该能用"的预期。
-///  * **分享**：用 `.jmoe`（AES 加密 + 自带元数据），对方导入 App
-///    后能直接看到详情并阅读。
-///
-/// # 为什么放后台 isolate
-///
-/// 一章节几百页，zip 压缩是纯 CPU 计算。放主 isolate 会让
-/// 「打包时整个界面卡住」。这里用常驻 worker（非 `compute()`，
-/// 避免每次新建 isolate）。
 class ZipPacker {
   ZipPacker._();
   static final ZipPacker instance = ZipPacker._();
@@ -90,7 +76,6 @@ class ZipPacker {
     _toWorker = null;
   }
 
-  /// 把目录打成 zip（不含 meta.json / cover.jpg，只要图片）。
   Future<File?> pack({
     required String dirPath,
     required String outPath,
@@ -130,7 +115,6 @@ class ZipPacker {
     });
   }
 
-  /// 同步实现（在 worker isolate 里跑）。
   static File? _run(
     String dirPath,
     String outPath,
@@ -154,14 +138,10 @@ class ZipPacker {
     if (files.isEmpty) return null;
     files.sort((a, b) => a.path.compareTo(b.path));
 
-    // **不压缩**（store 模式）：漫画图已是压缩格式（jpg/webp），
-    // 再 deflate 一遍几乎压不下去，只是白耗 CPU 和时间。
-    // store 模式打包接近纯 IO 速度，几百页也能很快完成。
     final archive = Archive();
     for (var i = 0; i < files.length; i++) {
       final f = files[i];
       final bytes = f.readAsBytesSync();
-      // 用文件名（001.jpg）作为包内路径，解压后就是干净的顺序图
       archive.addFile(ArchiveFile(f.uri.pathSegments.last, bytes.length, bytes));
       onProgress(i + 1, files.length);
     }
@@ -174,17 +154,7 @@ class ZipPacker {
   }
 }
 
-/// 把 zip 内的图片读出来（供阅读器按页读取）。
 class ZipReader {
-  /// 把 zip 里的图片解到应用缓存目录，返回该目录路径。
-  ///
-  /// # 为什么不直接从 zip 逐页读
-  ///
-  /// 从 zip 读单页需要每次重新解析整个中央目录（几十~几百条目），
-  /// 翻页会有明显延迟。首次打开时一次性解到缓存目录，
-  /// 之后就是普通文件读取，翻页和看本地目录一样快。
-  ///
-  /// 解出的目录以「zip 文件名 + 修改时间」为 key，重复打开直接复用。
   static Future<String?> extractToCache(String zipPath) async {
     try {
       final f = File(zipPath);
@@ -230,7 +200,6 @@ class ZipReader {
   static String _safeName(String s) =>
       s.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
 
-  /// 读出该 zip 内所有图片条目，按文件名排序。
   static List<String> listPages(String zipPath) {
     final bytes = File(zipPath).readAsBytesSync();
     final archive = ZipDecoder().decodeBytes(bytes);
@@ -243,7 +212,6 @@ class ZipReader {
     return names;
   }
 
-  /// 读取某一条目的字节。
   static Uint8List? readEntry(String zipPath, String name) {
     final bytes = File(zipPath).readAsBytesSync();
     final archive = ZipDecoder().decodeBytes(bytes);

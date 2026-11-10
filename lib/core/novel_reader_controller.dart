@@ -7,12 +7,6 @@ import 'reader_settings.dart';
 import 'reader_store.dart';
 import 'reading_stats.dart';
 
-/// 小说阅读会话控制器。
-///
-/// 从原 `_NovelReadPageState` 中抽出的**纯逻辑**部分：
-/// 章节加载、合并续读、进度保存、书签、搜索、统计。
-///
-/// 不持有任何 Widget / BuildContext，可独立测试。
 class NovelReaderController extends ChangeNotifier {
   NovelReaderController({
     required this.nid,
@@ -21,13 +15,10 @@ class NovelReaderController extends ChangeNotifier {
     required this.settings,
   });
 
-  /// 小说 id
   final String nid;
 
-  /// 章节列表（服务端返回的原始 Map）
   final List<Map<String, dynamic>> chapters;
 
-  /// 内容抓取（由页面注入，避免控制器依赖具体服务实现）
   final Future<Map<String, dynamic>?> Function({
     required String ncid,
     required String lang,
@@ -35,15 +26,12 @@ class NovelReaderController extends ChangeNotifier {
 
   final ReaderSettings settings;
 
-  // ---- 状态 ----
   int index = 0;
   String title = '';
   String text = '';
 
-  /// 合并后的全文（当前章 + 已预取后续章节）
   String mergedText = '';
 
-  /// 合并文本中每章起点
   final List<({int index, int start, String title})> chapterStarts = [];
 
   int mergedUpto = -1;
@@ -59,7 +47,6 @@ class NovelReaderController extends ChangeNotifier {
   int _statSeconds = 0;
   Timer? _statTimer;
 
-  /// 分页用的正文（优先合并文本）
   String get pageSource => mergedText.isNotEmpty ? mergedText : text;
 
   int get chapterCount => chapters.length;
@@ -67,10 +54,7 @@ class NovelReaderController extends ChangeNotifier {
   bool get hasNext => index < chapters.length - 1;
   bool get hasPrev => index > 0;
 
-  /// 服务端语种代码。JM 小说只有繁中版本，固定 TW。
   String langCode() => 'TW';
-
-  // ---- 生命周期 ----
 
   void start() {
     _startStatTimer();
@@ -84,12 +68,10 @@ class NovelReaderController extends ChangeNotifier {
     });
   }
 
-  /// 退出时结算剩余不足 10 秒的零头
   void stop() {
     _statTimer?.cancel();
     _statTimer = null;
     if (_statSeconds > 0) {
-      // 已按 10s 计过，这里只清空缓冲
       _statSeconds = 0;
     }
   }
@@ -99,8 +81,6 @@ class NovelReaderController extends ChangeNotifier {
     stop();
     super.dispose();
   }
-
-  // ---- 加载 ----
 
   Future<void> load({int? jumpToChapter}) async {
     final target = jumpToChapter ?? index;
@@ -115,7 +95,6 @@ class NovelReaderController extends ChangeNotifier {
     title = '${chapters[target]['title'] ?? ''}';
 
     try {
-      // 1) 先查本地加密缓存
       final cached = await NovelCacheManager.instance.get(nid, ncid);
       final cachedText = '${cached?['text'] ?? ''}';
 
@@ -127,12 +106,10 @@ class NovelReaderController extends ChangeNotifier {
         loading = false;
         notifyListeners();
 
-        // 后台补齐后续章节
         unawaited(extendMerged(count: 3).then((_) => notifyListeners()));
         return;
       }
 
-      // 2) 网络拉取
       cacheHit = false;
       final d = await service(ncid: ncid, lang: langCode());
       final raw = _htmlToText('${d?['content'] ?? ''}');
@@ -149,10 +126,8 @@ class NovelReaderController extends ChangeNotifier {
       _resetMerged(raw);
       notifyListeners();
 
-      // 3) 后台写缓存
       unawaited(NovelCacheManager.instance.put(nid, ncid, title, raw));
 
-      // 4) 记录统计
       unawaited(
         ReadingStats.instance.recordChapter(
           type: StatType.novel,
@@ -160,7 +135,6 @@ class NovelReaderController extends ChangeNotifier {
         ),
       );
 
-      // 5) 后台合并后续章节
       unawaited(extendMerged(count: 3).then((_) => notifyListeners()));
     } catch (e) {
       error = '$e';
@@ -177,7 +151,6 @@ class NovelReaderController extends ChangeNotifier {
     mergedUpto = index;
   }
 
-  /// 预取并拼接后续章节，实现无缝续读。
   Future<void> extendMerged({int count = 3}) async {
     if (extending) return;
     extending = true;
@@ -206,7 +179,6 @@ class NovelReaderController extends ChangeNotifier {
         }
         if (body.isEmpty) break;
 
-        // 插入章标题分隔
         if (mergedText.isNotEmpty) {
           mergedText += '\n\n\u2014\u2014 $t \u2014\u2014\n\n';
         }
@@ -223,8 +195,6 @@ class NovelReaderController extends ChangeNotifier {
     }
   }
 
-  // ---- 进度 ----
-
   Future<void> saveProgress({required double ratio}) async {
     await ReaderStore.instance.saveProgress(
       nid,
@@ -233,8 +203,6 @@ class NovelReaderController extends ChangeNotifier {
       chapterTitle: title,
     );
   }
-
-  // ---- 书签 ----
 
   Future<void> addBookmarkAt(int offset) async {
     final src = pageSource;
@@ -254,9 +222,6 @@ class NovelReaderController extends ChangeNotifier {
     );
   }
 
-  // ---- 内文搜索 ----
-
-  /// 在「当前章 + 已合并章节」中搜索，返回命中位置。
   Future<List<({int chapterIndex, int offset, String excerpt})>> searchInBook(
     String query,
   ) async {
@@ -264,7 +229,6 @@ class NovelReaderController extends ChangeNotifier {
     if (q.isEmpty) return const [];
 
     final hits = <({int chapterIndex, int offset, String excerpt})>[];
-    // 先搜内存中的合并文本（最快）
     if (mergedText.isNotEmpty) {
       var i = 0;
       while (true) {
@@ -280,7 +244,6 @@ class NovelReaderController extends ChangeNotifier {
       }
     }
 
-    // 再并发搜本地缓存的其他章节
     const workers = 4;
     var cursor = 0;
     final rest = <({int chapterIndex, int offset, String excerpt})>[];
@@ -288,7 +251,7 @@ class NovelReaderController extends ChangeNotifier {
     Future<void> worker() async {
       while (cursor < chapters.length) {
         final i = cursor++;
-        if (i == index) continue; // 已搜过
+        if (i == index) continue;
         final ncid = '${chapters[i]['ncid'] ?? ''}';
         if (ncid.isEmpty) continue;
         final cached = await NovelCacheManager.instance.get(nid, ncid);
@@ -326,8 +289,6 @@ class NovelReaderController extends ChangeNotifier {
     final e = (at + qLen + 24).clamp(0, src.length);
     return src.substring(s, e).replaceAll('\n', ' ');
   }
-
-  // ---- HTML → 纯文本 ----
 
   static String _htmlToText(String html) {
     if (html.isEmpty) return '';

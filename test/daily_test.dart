@@ -1,12 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jmoe/core/jm_service.dart';
 
-/// 签到数据解析回归测试。
-///
-/// 真实响应里 `record` 是**二维**的（按周分组）：
-///   [[01..07], [08..14], [15..21], [22..28], [29..30]]
-/// 早期实现只取每组第一项，日历上就只剩 1/8/15/22/29 —— 用户看到
-/// 「只显示 1、今天、15、22、29」。这里锁死必须完整摊平。
 void main() {
   Map<String, dynamic> dailyPayload() => {
         'daily_id': 74,
@@ -41,7 +35,6 @@ void main() {
   test('二维 record 被完整摊平为 30 天', () {
     final s = JmService.parseDaily(dailyPayload());
     expect(s.days.length, 30);
-    // 关键：不能只剩每组的首日
     expect(s.days.map((e) => e.date).toList(), [
       for (var d = 1; d <= 30; d++) '$d'.padLeft(2, '0'),
     ]);
@@ -78,14 +71,11 @@ void main() {
   });
 
   test('日历列序号：周日排首列（周日→0，周一→1，周六→6）', () {
-    // DateTime.weekday: 周一=1 … 周日=7
     int colOf(int weekday) => weekday % 7;
     expect(colOf(DateTime.sunday), 0);
     expect(colOf(DateTime.monday), 1);
     expect(colOf(DateTime.saturday), 6);
-    // 2026-11-01 是周日 → 首列，前面不留空
     expect(colOf(DateTime(2026, 11, 1).weekday), 0);
-    // 2026-11-08（今天）也是周日 → 落在首列
     expect(colOf(DateTime(2026, 11, 8).weekday), 0);
   });
 

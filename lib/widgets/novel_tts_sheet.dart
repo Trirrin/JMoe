@@ -4,7 +4,6 @@ import '../core/l10n.dart';
 import '../core/reader_native.dart';
 import '../core/reader_settings.dart';
 
-/// 朗读设置面板：语速、音调、语言、音色。
 class NovelTtsSheet extends StatefulWidget {
   const NovelTtsSheet({
     super.key,
@@ -18,7 +17,6 @@ class NovelTtsSheet extends StatefulWidget {
   final ReaderTheme theme;
   final VoidCallback onChanged;
 
-  /// 应用设置并开始朗读
   final VoidCallback onStart;
 
   @override
@@ -93,7 +91,6 @@ class _NovelTtsSheetState extends State<NovelTtsSheet> {
               },
             ),
             const SizedBox(height: 6),
-            // 音色
             Text(
               L.t('ttsVoice'),
               style: TextStyle(fontSize: 12.5, color: theme.fg),

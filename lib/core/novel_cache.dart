@@ -9,10 +9,6 @@ import 'package:pointycastle/api.dart' show KeyParameter, ParametersWithIV;
 import 'package:pointycastle/block/aes.dart';
 import 'package:pointycastle/block/modes/cbc.dart';
 
-/// 小说章节缓存：整章正文 **AES-256-CBC 加密落盘**，支持离线阅读与「先缓存再看」。
-///
-/// 文件格式与图片缓存一致：`MAGIC(4) | IV(16) | ciphertext`，
-/// 因此用文本/图片查看器无法直接读取。
 class NovelCacheManager {
   NovelCacheManager._();
   static final NovelCacheManager instance = NovelCacheManager._();
@@ -20,7 +16,7 @@ class NovelCacheManager {
   Directory? _dir;
 
   static const String _secret = 'jmoe-novel-v1-7c2f91';
-  static const List<int> _magic = [0x4A, 0x4E, 0x43, 0x01]; // JNC\x01
+  static const List<int> _magic = [0x4A, 0x4E, 0x43, 0x01];
   static final math.Random _rnd = math.Random.secure();
 
   static Uint8List _keyFor(String seed) {
@@ -53,7 +49,6 @@ class NovelCacheManager {
     return File('${d.path}/${_key(nid, ncid)}.jnc');
   }
 
-  /// 是否已缓存。
   Future<bool> has(String nid, String ncid) async {
     try {
       final f = await _file(nid, ncid);
@@ -63,7 +58,6 @@ class NovelCacheManager {
     }
   }
 
-  /// 写入章节正文（加密）。
   Future<void> put(
     String nid,
     String ncid,
@@ -82,7 +76,6 @@ class NovelCacheManager {
     } catch (_) {}
   }
 
-  /// 读取章节正文；未缓存或解密失败返回 null。
   Future<Map<String, dynamic>?> get(String nid, String ncid) async {
     try {
       final f = await _file(nid, ncid);
@@ -96,7 +89,6 @@ class NovelCacheManager {
     return null;
   }
 
-  /// 删除某章缓存。
   Future<void> remove(String nid, String ncid) async {
     try {
       final f = await _file(nid, ncid);
@@ -104,7 +96,6 @@ class NovelCacheManager {
     } catch (_) {}
   }
 
-  /// 清空全部小说缓存。
   Future<void> clearAll() async {
     try {
       final d = await _ensureDir();
@@ -113,7 +104,6 @@ class NovelCacheManager {
     } catch (_) {}
   }
 
-  /// 占用字节数。
   Future<int> usedBytes() async {
     try {
       final d = await _ensureDir();
@@ -127,8 +117,6 @@ class NovelCacheManager {
       return 0;
     }
   }
-
-  // ---------------- 加解密（AES-256-CBC/PKCS7） ----------------
 
   static Uint8List _encrypt(Uint8List plain, String seed) {
     final iv = _randomIv();

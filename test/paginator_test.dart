@@ -39,13 +39,10 @@ void main() {
       final text = List.generate(60, (i) => '第$i段文字内容，用来测试分页边界。').join('\n');
       final pages = paginate(text);
       expect(pages, isNotEmpty);
-      // 首页从 0 开始
       expect(pages.first.start, 0);
-      // 相邻页必须无缝衔接（允许缩进引入的空格偏差）
       for (var i = 1; i < pages.length; i++) {
         expect(pages[i].start, pages[i - 1].end);
       }
-      // 最后一页覆盖到结尾
       expect(pages.last.end, text.length);
     });
 
@@ -75,11 +72,9 @@ void main() {
       final text = '😀' * 2000;
       final pages = paginate(text);
       expect(pages, isNotEmpty);
-      // 每个切点都不应落在代理对中间
       for (final p in pages) {
         if (p.end > 0 && p.end < text.length) {
           final c = text.codeUnitAt(p.end);
-          // 低代理区说明切在了中间
           expect(c >= 0xDC00 && c <= 0xDFFF, isFalse,
               reason: '切点 ${p.end} 落在代理对中间');
         }

@@ -8,42 +8,14 @@ import 'package:pointycastle/api.dart' show KeyParameter, ParametersWithIV;
 import 'package:pointycastle/block/aes.dart';
 import 'package:pointycastle/block/modes/cbc.dart';
 
-/// JMoe 自有加密章节包（`.jmoe`）。
-///
-/// # 为什么不直接用 zip
-///
-/// 下载内容是 App 内部资源，用户不需要用别的软件打开。
-/// 用自有格式的好处：
-///  * **一个选集一个文件**：整章打包成单文件，不容易被逐个挑选/扫描；
-///  * **自带校验**：头部记录页数与摘要，坏包能立刻发现而不是读到一半崩；
-///  * **不依赖第三方解压库**：纯 Dart 直读，翻页时按索引 seek，无需先解全包；
-///  * **导出时**才转成带密码的 zip（给人分享用），内部储存始终是 `.jmoe`。
-///
-/// # 文件布局
-///
-/// ```
-/// MAGIC(8)  "JMOEARCH"  → 识别格式
-/// VERSION(1) 0x01
-/// FLAGS(1)   保留
-/// COUNT(4)   big-endian 页数
-/// for each page:
-///   IV(16) | LEN(4) | CIPHERTEXT(LEN)
-/// ```
-///
-/// 每页独立 AES-256-CBC（各自随机 IV），因此可以只解某一页，
-/// 不必把整章读进内存 —— 大章节也能流畅翻页。
-///
-/// 密钥由「章节 id + 固定盐」派生：同一设备重装后仍能解开，
-/// 换设备复制文件也能解开（这本来就是用户自己的内容）。
 class JmoeArchive {
   JmoeArchive._();
 
   static const List<int> _magic = [
-    0x4A, 0x4D, 0x4F, 0x45, 0x41, 0x52, 0x43, 0x48, // JMOEARCH
+    0x4A, 0x4D, 0x4F, 0x45, 0x41, 0x52, 0x43, 0x48,
   ];
   static const int _version = 1;
 
-  /// 派生密钥用的固定盐（非安全用途，只为避免明文可读）。
   static const String _salt = 'jmoe-archive-v1-3f9c1d';
 
   static Uint8List _keyFor(String chapterId) {
@@ -53,22 +25,6 @@ class JmoeArchive {
 
   static final _rnd = _SecureRandom();
 
-  /// 把某章的图片目录打包成 `.jmoe`（用于分享）。
-  ///
-  /// 包内除了页面，还会把**作品元数据**（标题/作者/简介/标签/封面）
-  /// 一并写进头部，这样对方导入后能直接看到作品详情并开始阅读，
-  /// 而不是拿到一堆无名的图片。
-  ///
-  /// # 性能：**流式逐页写入**
-  ///
-  /// 之前把所有页读进 `List<Uint8List>` 再一次性 `writeAsBytes`：
-  /// 一个 100+ 页的章节要占几百 MB 内存，主 isolate 被加密计算占满，
-  /// 用户看到的就是「点分享后 UI 卡死很久」。
-  /// 现在改成打开文件句柄逐页写：内存峰值只有一页，UI 不卡。
-  ///
-  /// [onProgress] 回调 (已完成页数, 总页数)，可用于显示进度。
-  ///
-  /// 返回生成的文件（失败返回 null）。
   static Future<File?> packDirectory({
     required String chapterDir,
     required String chapterId,
@@ -76,15 +32,6 @@ class JmoeArchive {
     Map<String, dynamic>? albumMeta,
     void Function(int done, int total)? onProgress,
   }) async {
-    // **整个打包过程放到后台 isolate 执行。**
-    //
-    // 之前在主 isolate 上逐页 AES-CBC 加密，每页还
-    // `await Future.delayed(Duration.zero)` 让出事件循环 ——
-    // 几百页就是几百次调度 + 几百次同步加密，UI 明显卡住，
-    // 用户点「打包分享」时整个界面都在定格。
-    //
-    // 加密是纯计算，不依赖 UI/平台通道，天然适合扔到后台。
-    // 用常驻 worker（非 compute()，避免每章新建 isolate）。
     return PackWorker.instance.pack(
       chapterDir: chapterDir,
       chapterId: chapterId,
@@ -94,10 +41,6 @@ class JmoeArchive {
     );
   }
 
-  /// 供后台 isolate 调用：执行真正的打包。
-  ///
-  /// 与 [packDirectory] 逻辑相同，但**不做 isolate 调度** ——
-  /// 它本身就是被 worker 在后台调用的。
   static Future<File?> packIsolate({
     required String chapterDir,
     required String chapterId,
@@ -109,7 +52,6 @@ class JmoeArchive {
     try {
       final dir = Directory(chapterDir);
       if (!await dir.exists()) return null;
-      // 收集页面（001.png…），排除 meta.json / cover.jpg
       final files = dir
           .listSync()
           .whereType<File>()
@@ -126,7 +68,6 @@ class JmoeArchive {
         ..sort((a, b) => a.path.compareTo(b.path));
       if (files.isEmpty) return null;
 
-      // 作品元数据序列化后放头部（长度 + JSON）
       final metaBytes = albumMeta == null
           ? Uint8List(0)
           : Uint8List.fromList(utf8.encode(jsonEncode(albumMeta)));
@@ -136,7 +77,6 @@ class JmoeArchive {
       await f.parent.create(recursive: true);
       raf = await f.open(mode: FileMode.write);
 
-      // 头部
       await raf.writeFrom(_magic);
       await raf.writeFrom(Uint8List.fromList([_version]));
       await raf.writeFrom(
@@ -146,7 +86,6 @@ class JmoeArchive {
       await raf.writeFrom(_u32(metaBytes.length));
       if (metaBytes.isNotEmpty) await raf.writeFrom(metaBytes);
 
-      // 逐页：读一页 → 加密 → 写一页 → 释放
       for (var i = 0; i < files.length; i++) {
         final plain = await files[i].readAsBytes();
         final iv = _rnd.iv16();
@@ -155,8 +94,6 @@ class JmoeArchive {
         await raf.writeFrom(_u32(enc.length));
         await raf.writeFrom(enc);
         onProgress?.call(i + 1, files.length);
-        // 在后台 isolate 里跑，不需要让出事件循环给 UI；
-        // 保留一次微让出，让同一 isolate 的进度消息能及时发出。
         if (i % 8 == 0) await Future<void>.delayed(Duration.zero);
       }
       await raf.flush();
@@ -171,7 +108,6 @@ class JmoeArchive {
     }
   }
 
-  /// 读取包内作品元数据（不解密页面，很快）。
   static Future<Map<String, dynamic>?> readAlbumMeta(String path) async {
     try {
       final f = File(path);
@@ -200,8 +136,6 @@ class JmoeArchive {
         (v >> 8) & 0xFF,
         v & 0xFF,
       ];
-  ///
-  /// [pages] 顺序即页序，index 从 1 开始对应数组下标 0。
   static Future<File> write({
     required String path,
     required String chapterId,
@@ -212,7 +146,6 @@ class JmoeArchive {
     out.add(_magic);
     out.addByte(_version);
     out.addByte(0);
-    // 页数（大端 4 字节）
     final n = pages.length;
     out.add([
       (n >> 24) & 0xFF,
@@ -239,7 +172,6 @@ class JmoeArchive {
     return f;
   }
 
-  /// 读取整包为「每页一个字节数组」（顺序与写入时一致）。
   static Future<List<Uint8List>?> readAll(
     String path, {
     required String chapterId,
@@ -274,7 +206,6 @@ class JmoeArchive {
     }
   }
 
-  /// 只读某一页（0-based）。大章节翻页时用它，避免解全包。
   static Future<Uint8List?> readPage(
     String path,
     int index, {
@@ -294,8 +225,6 @@ class JmoeArchive {
             (head[12] << 8) |
             head[13];
         if (index < 0 || index >= count) return null;
-        // 顺序扫描到目标页（页索引表未单独存，扫一遍很便宜：
-        // 每页只需读 20 字节头部并跳过长度的偏移）
         var off = 14;
         for (var i = 0; i < count; i++) {
           await raf.setPosition(off);
@@ -328,7 +257,6 @@ class JmoeArchive {
     }
   }
 
-  /// 读页数（不解密）。
   static Future<int> pageCount(String path) async {
     try {
       final raw = await File(path).readAsBytes();
@@ -339,7 +267,6 @@ class JmoeArchive {
     }
   }
 
-  /// 校验是不是 `.jmoe` 文件。
   static bool isArchiveName(String path) =>
       path.toLowerCase().endsWith('.jmoe');
 
@@ -397,7 +324,6 @@ class JmoeArchive {
   }
 }
 
-/// 轻量 IV 生成（仅供格式混淆，非安全关键）。
 class _SecureRandom {
   Uint8List iv16() {
     final seed = '${DateTime.now().microsecondsSinceEpoch}-'

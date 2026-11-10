@@ -3,18 +3,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 一个「关注」条目：可以关注作者或标签。
 class FollowItem {
-  /// 'author' 或 'tag'
   final String kind;
 
-  /// 关键词（作者名 / 标签名）
   final String keyword;
 
-  /// 显示名（默认同 keyword，可手动改）
   final String title;
 
-  /// 关注时间
   final int at;
 
   const FollowItem({
@@ -41,19 +36,12 @@ class FollowItem {
       );
 }
 
-/// 一个「专辑」：用来把同一作者的多部作品聚合在一起。
-///
-/// 为什么需要：同一作者可能有多个笔名、或用工作室名义发布，
-/// 单靠作者名字符串无法归到一起。所以专辑允许手工编辑**多个关键词**，
-/// 命中任一关键词的作品都算这个专辑的。
 class Album {
   final String id;
   final String name;
 
-  /// 多个关键词（作者名/笔名/工作室名），命中任一即归入本专辑
   final List<String> keywords;
 
-  /// 自定义封面（空 = 用最新作品的封面）
   final String cover;
 
   final int at;
@@ -79,7 +67,6 @@ class Album {
         at: at,
       );
 
-  /// 该作品作者是否命中本专辑的关键词。
   bool matches(String author) {
     final a = author.toLowerCase().trim();
     if (a.isEmpty) return false;
@@ -110,7 +97,6 @@ class Album {
       );
 }
 
-/// 关注（作者/标签）与专辑的持久化存储。
 class CollectStore extends ChangeNotifier {
   CollectStore._();
   static final CollectStore instance = CollectStore._();
@@ -154,8 +140,6 @@ class CollectStore extends ChangeNotifier {
     } catch (_) {}
   }
 
-  // ---------- 关注 ----------
-
   bool isFollowing(String kind, String keyword) =>
       _follows.any((e) => e.kind == kind && e.keyword == keyword);
 
@@ -195,8 +179,6 @@ class CollectStore extends ChangeNotifier {
       jsonEncode(_follows.map((e) => e.toJson()).toList()),
     );
   }
-
-  // ---------- 专辑 ----------
 
   Future<Album> createAlbum({
     required String name,

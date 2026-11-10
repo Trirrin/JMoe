@@ -10,11 +10,6 @@ import '../widgets/common_widgets.dart';
 import '../widgets/scroll_top_fab.dart';
 import 'login_page.dart';
 
-/// 评论区：头像、昵称、等级、点赞、回复。
-///
-/// 服务端字段（实测）：
-///   CID / UID / username / nickname / likes / content / photo /
-///   addtime / gender / parent_CID / expinfo{level,level_name,badges,expPercent}
 class CommentPage extends StatefulWidget {
   final String aid;
   final String title;
@@ -31,7 +26,6 @@ class _CommentPageState extends State<CommentPage> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
 
-  /// 滚动偏移（驱动回到顶部）
   double _scrollOffset = 0;
 
   void _onScroll() {
@@ -133,7 +127,6 @@ class _CommentPageState extends State<CommentPage> {
     }
   }
 
-  /// 点赞（comment_vote）。CID 是评论 id。
   Future<void> _toggleLike(Map<String, dynamic> c) async {
     final cid = '${c['CID'] ?? c['cid'] ?? c['id'] ?? ''}';
     if (cid.isEmpty) return;
@@ -161,8 +154,6 @@ class _CommentPageState extends State<CommentPage> {
     try {
       final r = await _service.voteComment(cid, aid: widget.aid);
       if (!mounted) return;
-      // 实测 comment_vote 成功时返回 {code: null, data: null}（HTTP 200），
-      // 只有失败才带 code/errorMsg。因此「没有错误码」即视为成功。
       final code = r['code'];
       final hasError = r['errorMsg'] != null || r['error'] != null;
       final ok = !hasError &&
@@ -215,23 +206,15 @@ class _CommentPageState extends State<CommentPage> {
     );
   }
 
-
   static const _months = {
     'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
     'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
   };
 
-  /// 统一日期显示为 yyyy-MM-dd。
-  ///
-  /// 服务端 `addtime` 可能是：
-  ///   - "Nov 07, 2026"（英文月份）
-  ///   - "2026-11-07 12:34:56"
-  ///   - Unix 秒/毫秒时间戳字符串
   String _fmtDate(String raw) {
     final s = raw.trim();
     if (s.isEmpty) return '';
 
-    // 1) 英文月份：Nov 07, 2026
     final m = RegExp(r'([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(\d{4})')
         .firstMatch(s);
     if (m != null) {
@@ -243,13 +226,11 @@ class _CommentPageState extends State<CommentPage> {
       }
     }
 
-    // 2) 已是 yyyy-MM-dd 开头
     final iso = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(s);
     if (iso != null) {
       return '${iso.group(1)}-${iso.group(2)}-${iso.group(3)}';
     }
 
-    // 3) 纯数字时间戳
     final n = int.tryParse(s);
     if (n != null && n > 1000000000) {
       final ms = n > 9999999999 ? n : n * 1000;
@@ -262,21 +243,11 @@ class _CommentPageState extends State<CommentPage> {
 
   String _two(int v) => v.toString().padLeft(2, '0');
 
-  /// 头像地址：photo 字段是相对路径（如 nopic-Male.gif），
-  /// 需要拼到主站的 /media/user/ 下。
   String? _avatarUrl(String? photo) {
     if (photo == null || photo.isEmpty) return null;
-    // nopic-Male.gif / nopic-Female.gif 是官方的「未上传头像」占位图，
-    // 加载它只会得到一张灰图，不如直接回落到人形图标。
     if (photo.startsWith('nopic')) return null;
     if (photo.startsWith('http')) return photo;
-    // 官方路径形如 https://{主站域名}/media/user/{photo}
-    //
-    // **必须用主站域名，不能用图片 CDN（imgHost）**。
-    // 实测：cdn-msp*.jmapiproxy*.cc 等图片 CDN 对 /media/user/ 路径
-    // 一律返回 0 字节，只有 www.cdnbtd.cc 这类主站才返回真实图片。
-    // 之前用 imgHost 拼 → 头像永远是空的，这就是"头像显示不出来"的原因。
-    final base = JmApi.instance.baseUrl; // 形如 https://host/
+    final base = JmApi.instance.baseUrl;
     return '${base}media/user/$photo';
   }
 
@@ -285,7 +256,6 @@ class _CommentPageState extends State<CommentPage> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        // 刷新按钮已移除：本页支持下拉刷新，再放一个按钮是重复入口
         title: Text(widget.title),
       ),
       body: Stack(
@@ -330,7 +300,6 @@ class _CommentPageState extends State<CommentPage> {
                             ),
                           ),
           ),
-          // 右下角：回到顶部
           Positioned(
             right: 16,
             bottom: 84,
@@ -473,7 +442,6 @@ class _CommentPageState extends State<CommentPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 头像：无真实头像时显示人形图标（比灰块好看）
               SizedBox(
                 width: 34,
                 height: 34,
@@ -581,7 +549,6 @@ class _CommentPageState extends State<CommentPage> {
             padding: const EdgeInsets.only(left: 43),
             child: Row(
               children: [
-                // 点赞
                 InkWell(
                   borderRadius: BorderRadius.circular(14),
                   onTap: () => _toggleLike(c),
@@ -615,7 +582,6 @@ class _CommentPageState extends State<CommentPage> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                // 回复
                 InkWell(
                   borderRadius: BorderRadius.circular(14),
                   onTap: () => _reply(c),

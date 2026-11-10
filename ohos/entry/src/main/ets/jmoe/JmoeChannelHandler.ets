@@ -7,42 +7,9 @@ import { window } from '@kit.ArkUI';
 import { audio } from '@kit.AudioKit';
 import { textToSpeech } from '@kit.CoreSpeechKit';
 
-/**
- * HarmonyOS NEXT 原生通道实现（完整版）。
- *
- * 对应 Android 的 MainActivity.kt / iOS 的 JmoeChannelHandler.swift。
- * 通道名与方法名完全一致，Dart 侧无需改动。
- *
- * # 能力清单
- *
- * | 方法 | 实现方式 |
- * |---|---|
- * | keepScreenOn | window.setWindowKeepScreenOn |
- * | getBrightness / setBrightness | window.getWindowProperties / setWindowBrightness |
- * | getVolume / setVolume | audio.AudioVolumeManager（系统音量） |
- * | setVolumeKeyPage | 鸿蒙不允许拦截硬件音量键，返回 false（平台限制） |
- * | shareFiles | wantConstant.ACTION_SEND_TO_DATA + FLAG_AUTH_READ_URI_PERMISSION |
- * | shareText | ACTION_SEND_TO_DATA（text/plain） |
- * | openPath | 拉起系统文件管理器定位 |
- * | pickFile | picker.DocumentViewPicker |
- * | pickSavePath | picker.DocumentViewPicker.save（选目录） |
- * | notify | notificationManager.publish |
- * | tts* | @kit.CoreSpeechKit 的 textToSpeech |
- *
- * # ArkTS 约束（踩过的坑）
- *
- *  * 模块级函数里不能用 `this` → 全用模块级变量
- *  * 不允许 `any` / `unknown` → 显式 interface
- *  * 不允许无类型对象字面量 → 参数封装成 [JmoeArgs]
- */
-
-// ---------------- 模块级状态 ----------------
-
 let abilityContext: common.UIAbilityContext | null = null;
 let ttsEngine: textToSpeech.TextToSpeechEngine | null = null;
 let ttsRequestSeq: number = 0;
-
-// ---------------- 参数封装 ----------------
 
 class JmoeArgs {
   on?: boolean;
@@ -105,8 +72,6 @@ interface ResultShape {
   notImplemented(): void;
 }
 
-// ---------------- 通道注册 ----------------
-
 export function registerJmoeChannels(
   messenger: BinaryMessenger,
   context: common.UIAbilityContext,
@@ -127,8 +92,6 @@ export function registerJmoeChannels(
     },
   });
 }
-
-// ---------------- reader 分发 ----------------
 
 function handleReader(call: MethodCallShape, result: ResultShape): void {
   const method: string = call.method;
@@ -151,7 +114,6 @@ function handleReader(call: MethodCallShape, result: ResultShape): void {
       setVolume(args.value ?? 0.5, result);
       break;
     case 'setVolumeKeyPage':
-      // 平台限制：鸿蒙不允许应用拦截硬件音量键
       result.success(false);
       break;
     case 'shareFiles':
@@ -186,14 +148,12 @@ function handleReader(call: MethodCallShape, result: ResultShape): void {
       break;
     case 'ttsSetRate':
     case 'ttsSetPitch':
-      // 语速/音调在 speak 时通过 extraParams 传入，这里只确认收到
       result.success(true);
       break;
     case 'ttsGetVoices':
       ttsGetVoices(result);
       break;
     case 'ttsSetVoice':
-      // 语音在 speak 时通过 extraParams 指定
       result.success(true);
       break;
     default:
@@ -212,8 +172,6 @@ function handleShare(call: MethodCallShape, result: ResultShape): void {
     result.notImplemented();
   }
 }
-
-// ---------------- 屏幕 ----------------
 
 async function setKeepScreenOn(
   on: boolean,
@@ -260,14 +218,6 @@ async function setBrightness(v: number, result: ResultShape): Promise<void> {
   }
 }
 
-// ---------------- 系统音量 ----------------
-
-/**
- * 取音乐流的音量管理器。
- *
- * 鸿蒙的音量按「音量组」管理，groupId 0 是默认组，
- * 里面能拿到 MEDIA（媒体）流的当前/最大/最小档位。
- */
 async function getVolumeGroup(): Promise<audio.AudioVolumeGroupManager | null> {
   try {
     const mgr: audio.AudioVolumeManager =
@@ -313,8 +263,6 @@ async function setVolume(v: number, result: ResultShape): Promise<void> {
     const span: number = max - min;
     const clamped: number = Math.max(0, Math.min(1, v));
     const target: number = min + Math.round(span * clamped);
-    // 注意：setVolume 定义在 AudioManager 上，
-    // AudioVolumeGroupManager 只有 get*Volume。
     const am: audio.AudioManager = audio.getAudioManager();
     await am.setVolume(audio.AudioVolumeType.MEDIA, target);
     result.success(true);
@@ -323,15 +271,6 @@ async function setVolume(v: number, result: ResultShape): Promise<void> {
   }
 }
 
-// ---------------- 分享 ----------------
-
-/**
- * 分享文件。
- *
- * 鸿蒙没有独立的「分享 SDK」，标准做法是用 Want 的
- * `ACTION_SEND_TO_DATA` 拉起系统分享面板，并授予读权限。
- * file:// 形式在应用间不可直接访问，这里用文件 URI + 授权标志。
- */
 async function shareFiles(
   paths: string[],
   result: ResultShape,
@@ -367,7 +306,6 @@ async function shareFiles(
   }
 }
 
-/** 分享文本。 */
 async function shareText(text: string, result: ResultShape): Promise<void> {
   if (abilityContext === null || text.length === 0) {
     result.success(false);
@@ -388,8 +326,6 @@ async function shareText(text: string, result: ResultShape): Promise<void> {
   }
 }
 
-// ---------------- 打开路径 ----------------
-
 async function openPath(path: string, result: ResultShape): Promise<void> {
   if (abilityContext === null || path.length === 0) {
     result.success(false);
@@ -407,8 +343,6 @@ async function openPath(path: string, result: ResultShape): Promise<void> {
     result.success(false);
   }
 }
-
-// ---------------- 文件选择 ----------------
 
 async function pickFile(
   extensions: string[],
@@ -443,12 +377,6 @@ async function pickFile(
   }
 }
 
-/**
- * 选择保存目录/路径。
- *
- * 用 DocumentViewPicker 的 save 模式：用户选一个位置并给文件名，
- * 返回可写的 URI。Dart 侧需要文件路径时用它写文件。
- */
 async function pickSaveDir(
   suggestedName: string,
   result: ResultShape,
@@ -476,8 +404,6 @@ async function pickSaveDir(
   }
 }
 
-// ---------------- 通知 ----------------
-
 async function notify(
   title: string,
   body: string,
@@ -502,8 +428,6 @@ async function notify(
     result.success(false);
   }
 }
-
-// ---------------- TTS ----------------
 
 async function ensureTtsEngine(): Promise<boolean> {
   if (ttsEngine !== null) {
@@ -545,7 +469,6 @@ async function ttsSpeak(
   try {
     ttsRequestSeq++;
     const extra: Record<string, Object> = {};
-    // speed 范围 0.5~2.0，pitch 范围 0.5~2.0（鸿蒙 TTS 约定）
     if (rate !== undefined) {
       extra['speed'] = Math.max(0.5, Math.min(2.0, rate * 2));
     }
@@ -583,7 +506,6 @@ async function ttsGetVoices(result: ResultShape): Promise<void> {
   try {
     const query: textToSpeech.VoiceQuery = {
       requestId: '' + Date.now(),
-      // 1 = 离线模式（在线模式当前不支持）
       online: 1,
     };
     const voices: Array<textToSpeech.VoiceInfo> =

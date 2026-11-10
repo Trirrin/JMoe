@@ -21,28 +21,15 @@ import '../core/zip_packer.dart';
 import 'widgets/cache_overlay.dart';
 import '../core/l10n.dart';
 
-/// 统一阅读器：JM 与 e-hentai 共用。
-///
-/// 缓存策略（以整章为粒度）：
-///  1. 进入即启动整章缓存任务（后台持续，离开页面也继续）
-///  2. 显示统一蒙版：进度条 + `xx/xx`，可选择「等待完成」或「边看边缓存」
-///  3. 缓存完成后蒙版自动消失，之后翻页全部命中内存，零延迟
 class UnifiedReaderPage extends StatefulWidget {
   final ComicSource source;
   final Comic comic;
   final List<Chapter> chapters;
   final int initialIndex;
 
-  /// 初始页码（从详情页续读时指定；<=0 表示沿用默认逻辑）。
   final int initialPage;
   final String albumName;
 
-  /// **离线模式**：直接读这个目录里的图片文件，不发起任何网络请求。
-  ///
-  /// 用户明确要求「离线看漫画界面要和在线一致，复用在线播放器，
-  /// 不要另写一个」。所以离线不再走独立的 OfflineReaderPage，
-  /// 而是让本页接管：顶栏/底栏/翻页模式/缩放手势/进度保存全部相同，
-  /// 只是页面数据来源从网络换成磁盘。
   final String? localDir;
 
   const UnifiedReaderPage({
@@ -61,19 +48,14 @@ class UnifiedReaderPage extends StatefulWidget {
 }
 
 class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
-  /// 竖向滚动控制器
   final _scroll = ScrollController();
 
-  /// 横向翻页控制器
   late PageController _pageController;
 
-  /// 音量键翻页通道
   static const _volChannel = MethodChannel('jmoe/reader');
 
-  /// 是否已启用音量键翻页（离开页面时关闭）
   bool _volKeyOn = false;
 
-  /// 音量键回调：向下 = 下一页，向上 = 上一页
   Future<void> _onVolumeKey(MethodCall call) async {
     if (call.method != 'onVolumeKey') return;
     final dir = (call.arguments as num?)?.toInt() ?? 0;
@@ -83,7 +65,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     final target = (_currentPage + dir).clamp(1, total);
     if (target == _currentPage) return;
     if (_vertical) {
-      // 竖向：滚到目标页
       final b = _bundle;
       final w = MediaQuery.of(context).size.width;
       double off = 0;
@@ -121,14 +102,12 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
   bool _showUi = true;
   int _currentPage = 1;
 
-  /// 离线页面文件（非空表示处于离线模式）
   List<File> _localFiles = const [];
 
   bool get _isLocal => widget.localDir != null;
 
   late int _index = widget.initialIndex;
 
-  /// 蒙版：等待缓存完成 或 已选择边看边缓存
   bool _overlayDismissed = false;
 
   Chapter? get _chapter =>
@@ -143,19 +122,10 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
   void initState() {
     super.initState();
     _vertical = AppState.instance.readerMode != 'horizontal';
-    // 横向翻页：**初始页必须指向续读位置**。
-    // 之前固定 PageController() 从第 0 页开始，所以即使 _currentPage
-    // 算对了（进度条也对），实际显示的还是第 1 页 —— 用户看到的就是
-    // 「进度条位置对，但漫画位置错误」。
     final startIndex = (widget.initialPage - 1).clamp(0, 1 << 30);
     _pageController = PageController(initialPage: startIndex);
     _scroll.addListener(_onScroll);
     ChapterCacheManager.instance.revision.addListener(_onCacheTick);
-    // ---- 音量键翻页 ----
-    // 阅读页启用：音量键改为翻页而不是调音量。
-    //
-    // 仅 Android 支持（iOS / 鸿蒙不允许拦截硬件音量键）。
-    // 不支持的平台直接跳过，连通道都不注册 —— 避免无效调用。
     if (PlatformCaps.supportsVolumeKeyPaging &&
         AppState.instance.volumeKeyPage) {
       _volKeyOn = true;
@@ -166,10 +136,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
             .catchError((_) => null),
       );
     }
-    // 阅读时长计时：漫画阅读器原先从不累加秒数（只有动漫/小说有），
-    // 导致统计页「漫画」一栏的时长永远为 0。这里按真实停留时间累计。
     _startReadingClock();
-    // 回到前台 / 切到后台时暂停或恢复计时，避免把挂后台的时间算进去
     _lifecycle = AppLifecycleListener(
       onStateChange: (s) {
         final foreground = s == AppLifecycleState.resumed;
@@ -183,9 +150,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     _load();
   }
 
-  // ---- 阅读时长计时 ----
-
-  /// 每 10 秒结算一次（与小说/动漫的粒度一致）
   Timer? _clock;
   DateTime? _clockSince;
   AppLifecycleListener? _lifecycle;
@@ -198,14 +162,12 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
       if (since == null) return;
       final sec = DateTime.now().difference(since).inSeconds;
       if (sec >= 10) {
-        // 已结算的部分清零基准，剩下的秒数留到下一次
         _clockSince = DateTime.now();
         ReadingStats.instance.addSeconds(StatType.comic, sec);
       }
     });
   }
 
-  /// 结算剩余秒数并停止计时（不足 10 秒也记，避免频繁进出丢时间）
   void _stopReadingClock() {
     _clock?.cancel();
     _clock = null;
@@ -218,39 +180,23 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
 
   @override
   void dispose() {
-    // 离开阅读页 → 先把当前页进度**强制**写一次。
-    // 之前只有换页且有 3s 节流才保存，用户「翻两页就退出」时
-    // 最后一次翻页落在节流窗口内 → 进度丢失，下次进来还是旧页。
     _saveProgress(_currentPage, force: true);
-    // 离开阅读页 → 结算剩余阅读时长
     _stopReadingClock();
     _lifecycle?.dispose();
-    // 离开阅读页 → 释放临时目录占用，开始计空闲时间（超时后自动回收）
     _releaseTemp();
     TempStore.instance.sweep();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     _pageController.dispose();
-    // 释放进度 notifier（滚动期间高频更新的对象，必须显式释放）
     _progressNotifier.dispose();
     _pageNotifier.dispose();
     ChapterCacheManager.instance.revision.removeListener(_onCacheTick);
-    // **离开阅读页必须停掉本章缓存任务**。
-    //
-    // 之前只移除了监听，任务还在后台继续下载 + 解码整章
-    // （799 页的章节会持续很久）。缓存解码只能在主 isolate 上跑，
-    // 于是退出阅读页后整个 App 都在和它抢 CPU ——
-    // 这就是「打开漫画再退出，整个 app 都卡」的原因。
-    //
-    // 注意：这里只取消「边看边缓存」的任务（persistToDisk=false）。
-    // 用户主动下载的任务必须继续，否则下载会被中途掐断。
     if (_task != null && !_task!.persistToDisk) {
       ChapterCacheManager.instance.cancel(
         widget.source.id,
         _task!.bundle.chapterId,
       );
     }
-    // 离开阅读页 → 关闭音量键拦截，恢复系统音量调节
     if (_volKeyOn) {
       _volChannel.setMethodCallHandler(null);
       unawaited(
@@ -262,14 +208,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     super.dispose();
   }
 
-  /// 缓存进度变化 → **不重建整页**，只刷新底栏/顶栏那一小块。
-  ///
-  /// 之前直接 setState：缓存任务每完成一页就自增 revision 通知一次，
-  /// 边看边缓存（3 路并发）时等于每秒重建阅读器十几次 ——
-  /// 每次重建都会重新布局所有可见 ReaderPageView、重新绑定图片，
-  /// 这就是「缓慢滑动异常卡顿、完全无法观看」的直接原因。
-  ///
-  /// 现在只更新一个 notifier，由顶栏/底栏各自局部监听。
   int _cacheReady = 0;
   int _cacheTotal = 0;
   final _cacheNotifier = ValueNotifier<int>(0);
@@ -284,13 +222,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     _cacheNotifier.value = ready;
   }
 
-  /// 滚动监听：**不 setState**，避免每帧重建整页导致卡死。
-  ///
-  /// 之前的写法在滚动里直接 setState，等于每一帧都重建整个阅读器
-  /// （含上千个 ReaderPageView），滚动越长越卡，最终 ANR。
-  ///
-  /// 现在用 ValueNotifier 只驱动底栏那一小块重绘；
-  /// 页码真正变化时才更新，且保存进度有独立节流。
   void _onScroll() {
     if (!_vertical) return;
     if (!_scroll.hasClients) return;
@@ -304,33 +235,22 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         ? (_localFiles.isEmpty ? 1 : _localFiles.length)
         : (_bundle?.length ?? 1);
     final page = (p * (total - 1)).round() + 1;
-    // 只推给进度条（值相同不会触发重建）
     _progressNotifier.value = p;
     _pageNotifier.value = page;
     if (page != _currentPage) {
       _currentPage = page;
-      // 保存进度本身有 3 秒节流，不会每帧写盘
       _saveProgress(page);
-      // **让缓存任务的「解码窗口」跟着读者走**：
-      // 只有当前页附近的页需要留在内存，远处的页落盘即可。
-      // 不更新 startPage 的话，窗口会一直停在进入时那一页，
-      // 读者滑到后面反而全靠临时解码 → 就是「缓慢滑动异常卡顿」。
       _task?.startPage = page - 1;
     }
   }
 
-  /// 竖向滚动进度（0~1），驱动底栏进度条，不重建整页。
   final _progressNotifier = ValueNotifier<double>(0);
 
-  /// 当前页码，驱动底栏页码文本。
   final _pageNotifier = ValueNotifier<int>(1);
 
-  /// 保存阅读进度（节流：每 3 秒或换页时）。
   DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
   void _saveProgress(int page, {bool force = false}) {
     final ch = _chapter;
-    // 总页数按模式取：离线时 _bundle 为 null，之前这里直接 return，
-    // 导致离线阅读的进度完全存不下来。
     final totalPage =
         _isLocal ? _localFiles.length : (_bundle?.length ?? 0);
     if (totalPage <= 0 || ch == null) return;
@@ -348,18 +268,8 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 离线加载：扫描目录里的图片文件，或从 zip 包里读页。
-  ///
-  /// 复用在线阅读器的一切（顶栏/底栏/翻页模式/缩放/进度），
-  /// 只是数据源换成磁盘。这样用户不会感到「离线是另一个 App」。
   Future<void> _loadLocal() async {
     try {
-      // **已打包成 zip**：把包内页解到应用缓存目录再按普通目录读。
-      //
-      // 下载完成会自动收拢成 zip（用户要求「下载后应该是压缩包」），
-      // 所以离线阅读必须支持 zip。这里选择"解包到缓存"而不是
-      // 每次从 zip 里逐个解压读取 —— 后者每翻一页都要重新解析
-      // 整个 zip 目录，翻页会明显变慢。
       var lp = widget.localDir!;
       if (lp.toLowerCase().endsWith('.zip')) {
         final extracted = await ZipReader.extractToCache(lp);
@@ -382,7 +292,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         });
         return;
       }
-      // 只取图片，按文件名排序（001.png, 002.png …）
       final files = dir
           .listSync()
           .whereType<File>()
@@ -411,7 +320,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
             (want >= 1 && want <= files.length) ? want : 1;
         _progressNotifier.value = files.length <= 1 ? 0 : (_currentPage - 1) / files.length;
       });
-      // 离线也记历史与统计（用户要求统计要算离线资源）
       final ch = _chapter;
       if (ch != null) {
         ReadingStats.instance.recordChapter(
@@ -448,7 +356,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
   }
 
   Future<void> _load() async {
-    // ---- 离线模式：扫目录取图片，界面与在线完全一致 ----
     if (_isLocal) {
       await _loadLocal();
       return;
@@ -472,20 +379,17 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
       setState(() {
         _bundle = b;
         _loading = false;
-        // 续读：跳到详情页指定的页（夹在本章范围内）
         final want = widget.initialPage;
         _currentPage = (want >= 1 && want <= b.length) ? want : 1;
         _progressNotifier.value = b.length <= 0 ? 0 : (_currentPage - 1) / b.length;
       });
 
-      // 记录统计（章节 + 页数 + 来源 + 类型）
       ReadingStats.instance.recordChapter(
         type: StatType.comic,
         workId: widget.comic.id,
         pages: b.length,
       );
 
-      // 记录历史
       AppState.instance.recordHistory(
         ReadHistoryEntry(
           comicId: widget.comic.id,
@@ -500,17 +404,12 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
           cover: widget.source.coverOf(widget.comic),
           source: widget.source.id,
           kind: 'comic',
-          // 关键：记下**续读起始页**，否则每次记录都用默认值 1，
-          // 进度条永远是 0，下次进来也从第 1 页开始。
           page: _currentPage,
           totalPage: b.length,
           updatedAt: DateTime.now().millisecondsSinceEpoch,
         ),
       );
 
-      // 启动整章缓存（后台持续）
-      // 若该章此前已完整缓存（磁盘仍在 / 已有临时目录），
-      // 直接进入阅读，不再显示缓存蒙版
       final alreadyCached = CacheManager.instance.hasChapter(
             widget.source.id,
             b.chapterId,
@@ -521,18 +420,13 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         comic: widget.comic,
         bundle: b,
         skipIfCached: alreadyCached,
-        // 从用户当前所在页向两侧扩散加载，优先保证眼前这一页
         startPage: _currentPage,
-        // 按屏幕物理宽度解码：漫画页常是超长图，全尺寸解码
-        // 又慢又占内存，而实际只显示到屏幕宽度。
         decodeWidth:
             (MediaQuery.of(context).size.width *
                     MediaQuery.of(context).devicePixelRatio)
                 .round(),
       );
       if (!mounted) return;
-      // 大章节：临时目录就绪后再「占用」，离开阅读页才释放。
-      // 占用期间不做空闲回收，避免边看边被清扫。
       if (task.tempDirReady != null) {
         await task.tempDirReady;
         final td = task.tempDir;
@@ -541,7 +435,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
       if (!mounted) return;
       setState(() {
         _task = task;
-        // 已缓存完成 / 空章节 / 今天已勾选「不再询问」→ 不显示蒙版
         _overlayDismissed = task.isCompleted ||
             b.length == 0 ||
             AppState.instance.cacheSkipToday;
@@ -573,7 +466,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     _load();
   }
 
-  /// 释放当前章的临时目录占用（交给空闲回收）。
   void _releaseTemp() {
     final td = _task?.tempDir;
     if (td != null && td.isNotEmpty) TempStore.instance.release(td);
@@ -603,8 +495,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         children: [
           Positioned.fill(child: _buildBody()),
           _buildTopBar(),
-          // 缓存进度：位于标题工具栏下方，边看边缓存/后台缓存时持续显示
-          // 与顶栏/底栏一起受 _showUi 控制，隐藏界面时同步隐藏
           if (_showUi &&
               task != null &&
               !task.isCompleted &&
@@ -615,9 +505,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
               right: 0,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                // 进度条用 ValueListenableBuilder 自行刷新：
-                // 缓存 tick 不再触发整页 setState（那样会重建所有可见页），
-                // 改由这里局部监听，进度仍然实时更新。
                 child: ValueListenableBuilder<int>(
                   valueListenable: _cacheNotifier,
                   builder: (context, ready, _) {
@@ -639,7 +526,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // 进度条右侧显示百分比
                         Text(
                           '${(prog * 100).round()}%',
                           style: const TextStyle(
@@ -660,10 +546,8 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
             Positioned.fill(
               child: CacheOverlay(
                 task: task,
-                // 缓存完成 → 自动关闭蒙版进入阅读
                 onWait: () =>
                     setState(() => _overlayDismissed = true),
-                // 用户选择边看边缓存 → 立即进入（任务在后台继续）
                 onReadNow: () =>
                     setState(() => _overlayDismissed = true),
                 onCancel: () {
@@ -712,7 +596,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         ),
       );
     }
-    // ---- 离线模式：走同一套 UI，只是页面源换成磁盘文件 ----
     if (_isLocal) {
       if (_localFiles.isEmpty) {
         return Center(
@@ -739,7 +622,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 离线竖向。
   Widget _buildLocalVertical() {
     if (!_restoredScroll && _currentPage > 1) {
       _restoredScroll = true;
@@ -757,14 +639,12 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     return ListView.builder(
       controller: _scroll,
       itemCount: _localFiles.length,
-      // 从 6000 降到 2000：6000 会同时构建并解码约 8 页，负担过重。
       cacheExtent: 2000,
       physics: const ClampingScrollPhysics(),
       itemBuilder: (context, i) => _buildLocalPage(i),
     );
   }
 
-  /// 离线横向。
   Widget _buildLocalHorizontal() {
     return PageView.builder(
       controller: _pageController,
@@ -785,7 +665,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 各离线页的真实比例（用于占位与滚动估算）
   final Map<int, double> _localRatios = {};
 
   Widget _buildLocalPage(int i) {
@@ -795,26 +674,15 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
       fallbackRatio: _localRatios[i] ?? 0.72,
       onLoaded: (r) {
         if (!_localRatios.containsKey(i)) {
-          // 只记录一次，避免重复 setState
           _localRatios[i] = r;
         }
       },
     );
   }
 
-  /// 大章节临时目录（任务创建后才有值；非空时页面从这里读）
   String? get _tempDir => _task?.tempDir;
 
   Widget _buildVertical(ReadBundle b) {
-    // 竖向条漫：**恢复滚动位置到续读页**。
-    //
-    // 之前 ListView 从不滚动到 _currentPage，所以续读时总是从第 1 页
-    // 顶部开始 —— 而进度条（_progress）是用 _currentPage 算的，
-    // 于是出现「进度条位置对、实际画面错」的矛盾。
-    //
-    // 做法：首帧后用 estimated 高度把目标页滚到视口顶部。
-    // 各页高度未知（图片比例不同），因此用 fallbackRatio 估算，
-    // 并在每页载入真实比例后由 _rememberRatio 修正后续估算。
     if (!_restoredScroll && _currentPage > 1) {
       _restoredScroll = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -823,11 +691,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         _scroll.jumpTo(target.clamp(0.0, _scroll.position.maxScrollExtent));
       });
     }
-    // 解码宽度 = 屏幕物理宽度。
-    //
-    // 不再乘 1.15 冗余：冗余会让像素量多 32%、解码慢 32%，
-    // 而 BoxFit.fitWidth 本来就按屏幕宽绘制，多出的像素全被丢弃。
-    // 追求「快速滑动更跟手」优先，清晰度肉眼无差别。
     final decodeW =
         (MediaQuery.of(context).size.width *
                 MediaQuery.of(context).devicePixelRatio)
@@ -835,15 +698,10 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     return ListView.builder(
       controller: _scroll,
       itemCount: b.length,
-      // 从 6000 降到 2000：6000 会同时构建并解码约 8 页，负担过重。
       cacheExtent: 2000,
       physics: const ClampingScrollPhysics(),
       itemBuilder: (context, i) {
         return RepaintBoundary(
-          // 每页独立重绘边界：
-          // 快速滑动时某页图片刚解码完成会触发重建，
-          // 没有边界的话整屏所有页都要重绘；有了边界只重绘本页。
-          // 这是「滑太快微微卡顿」最直接的改善点。
           child: ReaderPageView(
             key: ValueKey('${b.chapterId}_${i}_${b.pages[i].index}'),
             ref: b.pages[i],
@@ -857,7 +715,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
                 'page_${b.pages[i].index}',
             chapterId: b.chapterId,
             tempDir: _tempDir,
-            // 占位高度沿用「上一页真实比例」，图片载入时就不会跳
             fallbackRatio: _ratioAt(i),
             onLoaded: (r) => _rememberRatio(i, r),
           ),
@@ -866,19 +723,13 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 是否已经恢复过竖向滚动位置（只做一次，避免用户手动滚动后被拉回）。
   bool _restoredScroll = false;
 
-  /// 估算第 [index] 页在竖向列表中的滚动偏移。
-  ///
-  /// 每页高度 = 屏宽 / 该页比例（宽/高），再加上页间距。
-  /// 比例未知时用 fallbackRatio，已载入的页用真实比例。
   double _estimateOffsetFor(ReadBundle b, int index) {
     final width = MediaQuery.of(context).size.width;
     var offset = 0.0;
     for (var i = 0; i < index && i < b.length; i++) {
       final r = _ratioAt(i);
-      // 防止比例为 0 导致无穷大
       final safe = r <= 0.01 ? 0.72 : r;
       offset += width / safe;
     }
@@ -903,7 +754,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
             child: ReaderPageView(
               key: ValueKey('${b.chapterId}_${i}_${b.pages[i].index}'),
               ref: b.pages[i],
-              // 横向：一页占满屏幕，按屏幕宽度解码即可
               decodeWidth:
                   (MediaQuery.of(context).size.width *
                           MediaQuery.of(context).devicePixelRatio)
@@ -927,53 +777,41 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 每页的真实宽高比（加载完成后记录）。
   final Map<int, double> _ratios = {};
 
-  /// 第 [i] 页的占位比例：优先用相邻已加载页的真实比例，
-  /// 让「占位 → 真图」的尺寸变化尽可能为 0（用户感知不到跳变）。
   double _ratioAt(int i) {
     final self = _ratios[i];
     if (self != null) return self;
-    // 向前找最近一页
     for (var k = i - 1; k >= 0; k--) {
       final r = _ratios[k];
       if (r != null) return r;
     }
-    // 向后找最近一页
     for (var k = i + 1; k < (_bundle?.length ?? 0); k++) {
       final r = _ratios[k];
       if (r != null) return r;
     }
-    // 漫画页面的常见比例（约 A5 竖版）
     return 0.72;
   }
 
   void _rememberRatio(int i, double r) {
     if (r <= 0 || !r.isFinite) return;
     if (_ratios[i] == r) return;
-    // 不 setState：占位已被真实图片取代，重生整棵列表反而会掉帧
     _ratios[i] = r;
   }
 
-  /// 跳到指定页（目录/上一章下一章用；页内不再提供「跳过」按钮）。
   void _skipTo(int index) {
-    // 总页数按当前模式取（离线用 _localFiles）
     final total = _isLocal ? _localFiles.length : (_bundle?.length ?? 0);
     if (total <= 0 || index < 0 || index >= total) return;
     final p = total <= 1 ? 0.0 : index / (total - 1);
     _currentPage = index + 1;
-    // 只更新进度条，不 setState 重建整页
     _progressNotifier.value = p;
     _pageNotifier.value = index + 1;
     if (_vertical) {
-      // 竖向：按页估算位置直接跳（jumpTo 比 animateTo 轻，拖动时不卡）
       if (_scroll.hasClients) {
         final max = _scroll.position.maxScrollExtent;
         if (max > 0) _scroll.jumpTo(max * p);
       }
     } else {
-      // 横向：拖动时用 jumpToPage 避免动画排队（快速滑动会卡）
       if (_pageController.hasClients) _pageController.jumpToPage(index);
     }
     _saveProgress(index + 1);
@@ -1020,9 +858,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
                 ),
               ),
             ),
-            // 顶栏缓存指示（xx/xx），后台缓存时也能看到。
-            // 用 ValueListenableBuilder 局部刷新 —— 缓存每完成一页都会
-            // 通知，若走整页 setState 会把所有可见页重建一遍（卡顿主因）。
             if (_task != null && !_task!.isCompleted)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -1064,7 +899,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 当前页是否已被加为书签
   bool get _bookmarkedThisPage {
     final ch = _chapter;
     if (ch == null) return false;
@@ -1075,7 +909,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 添加 / 移除当前页书签（可附批注）。
   Future<void> _togglePageBookmark() async {
     final ch = _chapter;
     if (ch == null) return;
@@ -1085,7 +918,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         : L.tp('episodeN', {'n': ch.sort > 0 ? ch.sort : 1});
 
     if (on) {
-      // 加书签时问一句批注（可以不填）
       final note = await _askNote();
       if (!mounted) return;
       await AppState.instance.setChapterBookmark(
@@ -1124,7 +956,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 弹一个输入框收批注；返回 null 表示用户取消。
   Future<String?> _askNote() async {
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -1159,12 +990,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
   }
 
   Widget _buildBottomBar() {
-    // 总页数要按当前模式取：
-    //  * 在线 → _bundle.length
-    //  * 离线 → _localFiles.length
-    //
-    // 之前只取 _bundle，离线模式下 _bundle 是 null → total 恒为 0，
-    // 于是底栏显示「1/0」、滑块无效。
     final total = _isLocal ? _localFiles.length : (_bundle?.length ?? 0);
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 200),
@@ -1191,8 +1016,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
           children: [
             Row(
               children: [
-                // 页码只在滚动时变化 → 用 ValueListenableBuilder 局部重建，
-                // 不牵动整个阅读器（这是之前滚动卡死的主因）。
                 ValueListenableBuilder<int>(
                   valueListenable: _pageNotifier,
                   builder: (context, page, _) => Text(
@@ -1232,7 +1055,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 const SizedBox(width: 4),
-                // 书签：把「当前章节 + 当前页」加入书签，可附批注
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   tooltip: L.t('bookmarkThisPage'),
@@ -1367,7 +1189,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
   }
 }
 
-/// 单页：优先使用已缓存解码图，未就绪则实时加载（边看边缓存）。
 class ReaderPageView extends StatefulWidget {
   final PageRef ref;
   final String? scrambleId;
@@ -1377,25 +1198,14 @@ class ReaderPageView extends StatefulWidget {
   final String cacheKey;
   final BoxFit fit;
 
-  /// 占位比例（宽/高）：用于「图片未到」时的骨架高度。
-  ///
-  /// 与真实图片比例越接近，加载完成时的位移越小。
   final double fallbackRatio;
 
-  /// 大章节的临时目录（非空时优先从这里读，避免整章驻留内存）。
   final String? tempDir;
 
-  /// 章节 id（读临时目录时用来派生解密键）
   final String chapterId;
 
-  /// 图片解码完成后回调真实比例，供后续页面作为占位比例复用。
   final ValueChanged<double>? onLoaded;
 
-  /// 解码目标宽度（物理像素）。null = 按原图尺寸解码。
-  ///
-  /// 漫画页常是 800×5000 的超长图，全尺寸解码既慢又占内存，
-  /// 而实际只显示到屏幕宽度。限制解码宽度能显著减少
-  /// 滚动时每换一页的卡顿。
   final int? decodeWidth;
 
   const ReaderPageView({
@@ -1430,8 +1240,6 @@ class _ReaderPageViewState extends State<ReaderPageView> {
   }
 
   void _syncHit() {
-    // 仅当 cacheKey 就是最终图片地址（JM 源）时才能同步命中；
-    // EH 源需先解析页面地址，统一走 _start()。
     final key = widget.cacheKey;
     if (key.startsWith('http') && widget.ref.directUrl != null) {
       final cached = ImageCacheManager.instance.getUiSync(key);
@@ -1458,7 +1266,6 @@ class _ReaderPageViewState extends State<ReaderPageView> {
     if (_started) return;
     _started = true;
 
-    // ---- 大章节：直接从临时目录读（内存只留当前解码页）----
     final tempDir = widget.tempDir;
     if (tempDir != null && tempDir.isNotEmpty) {
       final bytes = await TempStore.instance.get(
@@ -1480,7 +1287,6 @@ class _ReaderPageViewState extends State<ReaderPageView> {
         if (img == null) _started = false;
         return;
       }
-      // 临时目录还没写到这一页 → 落到下面走「网络/缓存」路径
     }
 
     var url = widget.ref.directUrl;
@@ -1501,8 +1307,6 @@ class _ReaderPageViewState extends State<ReaderPageView> {
 
     final bytes = await ImageCacheManager.instance.load(
       url,
-      // 阅读页图片同样可能在死域名上（服务端下发的直链），
-      // 失败后换镜像再试，与封面同一套自愈逻辑。
       fetcher: (u) async {
         final b = await JmApi.instance.fetchBytes(
           u,
@@ -1582,9 +1386,6 @@ class _ReaderPageViewState extends State<ReaderPageView> {
     }
     final img = _image;
     if (img == null) {
-      // 占位：用 fallbackRatio 撑出与真实图片近似的尺寸，
-      // 图片到达时高度基本不变 → 用户感知不到跳变。
-      // （原来固定 0.7，遇到跨页大图会整页往上弹一大截）
       return AspectRatio(
         aspectRatio: widget.fallbackRatio <= 0 ? 0.72 : widget.fallbackRatio,
         child: Center(
@@ -1610,7 +1411,6 @@ class _ReaderPageViewState extends State<ReaderPageView> {
       );
     }
     final ratio = img.width / img.height <= 0 ? 0.72 : img.width / img.height;
-    // 回调真实比例（不重建）：后续未加载的页用它作为占位比例
     widget.onLoaded?.call(ratio);
     return AspectRatio(
       aspectRatio: ratio,
@@ -1623,12 +1423,6 @@ class _ReaderPageViewState extends State<ReaderPageView> {
   }
 }
 
-
-
-/// 离线单页图片（从磁盘文件读取）。
-///
-/// 与在线 ReaderPageView 视觉一致：同样的占位比例、同样的 fit、
-/// 同样在解码后回调真实比例。区别只是数据来自 File 而不是网络。
 class _LocalImageView extends StatefulWidget {
   const _LocalImageView({
     super.key,
@@ -1690,7 +1484,6 @@ class _LocalImageViewState extends State<_LocalImageView> {
     }
     final img = _image;
     if (img == null) {
-      // 占位：与真实比例一致，图片到位时不跳
       return AspectRatio(
         aspectRatio:
             widget.fallbackRatio <= 0.01 ? 0.72 : widget.fallbackRatio,
@@ -1701,15 +1494,6 @@ class _LocalImageViewState extends State<_LocalImageView> {
   }
 }
 
-/// 「点一下切换 UI」的包装：**不抢滚动手势**。
-///
-/// 之前用 `GestureDetector(behavior: opaque, onTap: ...)` 包住列表：
-/// 它的 tap 识别器会和 ListView 的纵向拖动竞争 ——
-/// 快速甩动还行，但**缓慢拖动**时 tap 常被判为"未移动"，
-/// 于是滚动被吃掉，表现就是「死活划不动」。
-///
-/// 改用 Listener：只记录按下位置，抬起时若位移很小才当作点击。
-/// Listener 不参与手势竞技场，滚动手势完全不受影响。
 class _TapToToggleUi extends StatefulWidget {
   const _TapToToggleUi({required this.onTap, required this.child});
 
@@ -1723,7 +1507,6 @@ class _TapToToggleUi extends StatefulWidget {
 class _TapToToggleUiState extends State<_TapToToggleUi> {
   Offset? _downPos;
 
-  /// 超过这个位移就不算点击（交给滚动）
   static const double _slop = 12;
 
   @override

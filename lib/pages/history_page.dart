@@ -12,13 +12,6 @@ import 'novel_pages.dart';
 import 'unified_detail_page.dart';
 import '../core/l10n.dart';
 
-/// 阅读历史：**按作品聚合**，一个作品一个槽位。
-///
-/// 关键行为：
-///  * 同一作品的多个选集合并成一行（展开可看各选集进度，未看过的不列出）
-///  * 支持两种排序：最近观看 / 总进度占比（所有选集页数之和）
-///  * 图标区分漫画 / 小说 / 视频
-///  * 点击进入详情，并带 Hero 封面转场
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
 
@@ -29,7 +22,6 @@ class HistoryPage extends StatefulWidget {
 class _HistoryPageState extends State<HistoryPage> {
   HistorySort _sort = HistorySort.recent;
 
-  /// 展开的作品 id 集合
   final Set<String> _expanded = {};
 
   @override
@@ -42,7 +34,6 @@ class _HistoryPageState extends State<HistoryPage> {
       appBar: AppBar(
         title: Text(L.t('readHistory')),
         actions: [
-          // 排序切换
           PopupMenuButton<HistorySort>(
             initialValue: _sort,
             tooltip: L.t('sort'),
@@ -112,7 +103,6 @@ class _HistoryPageState extends State<HistoryPage> {
     }
   }
 
-  /// 类型图标 + 文案
   (IconData, String) _kindOf(String kind) => switch (kind) {
         'novel' => (Icons.menu_book_rounded, L.t('novels')),
         'video' => (Icons.movie_rounded, L.t('anime')),
@@ -136,13 +126,11 @@ class _HistoryPageState extends State<HistoryPage> {
               padding: const EdgeInsets.all(10),
               child: Row(
                 children: [
-                  // 封面（Hero）
                   SizedBox(
                     width: 52,
                     height: 70,
                     child: Hero(
                       tag: 'history_cover_${g.source}_${g.comicId}',
-                      // 飞行层独立构造：不依赖卡片实例
                       flightShuttleBuilder: (ctx, anim, dir, from, to) {
                         return ClipRRect(
                           borderRadius: BorderRadius.circular(6),
@@ -176,7 +164,6 @@ class _HistoryPageState extends State<HistoryPage> {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        // 类型 + 选集数 + 最近时间
                         Row(
                           children: [
                             Icon(kindIcon, size: 12, color: scheme.primary),
@@ -206,7 +193,6 @@ class _HistoryPageState extends State<HistoryPage> {
                           ],
                         ),
                         const SizedBox(height: 5),
-                        // 总进度条（所有选集之和）
                         Row(
                           children: [
                             Expanded(
@@ -234,7 +220,6 @@ class _HistoryPageState extends State<HistoryPage> {
                       ],
                     ),
                   ),
-                  // 展开选集列表
                   if (hasSub)
                     IconButton(
                       tooltip: expanded ? L.t('collapse') : L.t('expand'),
@@ -258,7 +243,6 @@ class _HistoryPageState extends State<HistoryPage> {
               ),
             ),
           ),
-          // 展开后：每个**看过**的选集一行
           if (expanded) ...[
             Divider(
               height: 1,
@@ -333,7 +317,6 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
-  /// 打开作品：按类型进入对应详情，并带 Hero 封面 tag。
   void _open(HistoryGroup g, {ReadHistoryEntry? chapter}) {
     final tag = 'history_cover_${g.source}_${g.comicId}';
     if (g.kind == 'novel') {
@@ -365,7 +348,6 @@ class _HistoryPageState extends State<HistoryPage> {
       source: g.source,
     );
     Navigator.of(context).push(
-      // 传 coverTag：详情页封面用同一个 Hero tag，才能飞起来
       detailRoute(
         builder: (_) => UnifiedDetailPage(
           source: source,

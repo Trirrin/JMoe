@@ -13,17 +13,11 @@ import '../core/app_state.dart';
 import '../core/reading_stats.dart';
 import '../core/video_cache.dart';
 
-/// 动漫 / 影片播放页（完整功能）：
-/// - 手势：垂直左亮度右音量、水平拖动进度、双击左右快进/快退、长按 3 倍速
-/// - 控制条：播放/暂停、±10s、进度条、倍速、画面模式、全屏、锁屏
-/// - 断点续播、播放完成自动下一集（同系列）
-/// - 底部：标题、来源、简介、标签、相关推荐
 class AnimePlayerPage extends StatefulWidget {
   final String id;
   final String title;
   final String videoType;
 
-  /// 同系列（多集）播放列表：每项 {id, title, photo?}
   final List<Map<String, dynamic>> playlist;
   final int playlistIndex;
 
@@ -50,42 +44,33 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
   late String _currentId;
   late String _currentTitle;
 
-  // 控制层
   bool _showControls = true;
   bool _locked = false;
   bool _fullscreen = false;
   Timer? _hideTimer;
 
-  // 手势
-  double _brightness = 0.5; // 0..1 当前亮度（真实值）
-  double _volume = 0.5; // 0..1 当前媒体音量（真实值）
-  double? _seekPreview; // 拖动中的预览位置（毫秒）
+  double _brightness = 0.5;
+  double _volume = 0.5;
+  double? _seekPreview;
   double? _dragStartMs;
-  String? _hud; // 瞬时提示文字
+  String? _hud;
 
-  // 长按倍速模式：长按后左右滑动改倍速
   bool _longPressing = false;
   double _rateAtLongPress = 1.0;
 
-  /// 长按期间临时倍速（仅用于 HUD 显示，不持久化）
   double? _tmpRate;
 
-  // 垂直滑动基准
   double _vertBase = 0;
   bool _vertIsBrightness = true;
 
-  // 预缓存状态
   bool _caching = false;
   int _cacheDone = 0;
   int _cacheTotal = 0;
   bool _cancelCache = false;
 
-  // ---- 统计埋点 ----
-  /// 上次已计入统计的播放位置（毫秒），用于按增量累计时长
   int _lastStatPosition = 0;
   bool _statRecorded = false;
 
-  // 设置
   double _rate = 1.0;
   BoxFit _fit = BoxFit.contain;
 
@@ -112,7 +97,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     _hideTimer?.cancel();
     _controller?.dispose();
     _restoreSystemUi();
-    // 退出播放器恢复系统亮度（-1 = 跟随系统）
     ReaderNative.instance.setBrightness(-1);
     super.dispose();
   }
@@ -125,8 +109,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     }
   }
 
-
-  /// 读取当前系统亮度与媒体音量，作为手势起点。
   Future<void> _loadInitialLevels() async {
     final b = await ReaderNative.instance.getBrightness();
     final v = await ReaderNative.instance.getVolume();
@@ -166,16 +148,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     } catch (_) {}
   }
 
-  /// 正在切换选集（加载/缓存中）。
-  ///
-  /// 切换过程包含「取播放地址 → 下载缓存 → 初始化播放器」几步，
-  /// 期间若再点别的选集，会把 `_currentId` 改成新值但旧流程仍在跑，
-  /// 最后两边都去初始化 `_controller` → 相互打断、界面错乱。
-  /// 因此切换期间**忽略新的切换请求**。
   bool _switching = false;
 
   Future<void> _load({String? id, String? title}) async {
-    if (_switching) return; // 动画/加载中，不接受新的切换
+    if (_switching) return;
     _switching = true;
     if (id != null) _currentId = id;
     if (title != null) _currentTitle = title;
@@ -208,7 +184,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       if (t.isNotEmpty) _currentTitle = t;
     }
 
-    // ---- 播放前缓存：命中本地直接播，未命中先下载 ----
     String playSrc = src;
     final local = await VideoCacheManager.instance.cachedPath(src);
     if (local != null) {
@@ -219,7 +194,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         });
       }
     } else {
-      // 进入缓存阶段（UI 显示进度）
       if (mounted) {
         setState(() {
           _caching = true;
@@ -232,7 +206,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         url: src,
         onProgress: (doneBytes, totalBytes) {
           if (!mounted) return;
-          // 字节级进度：直接映射到 0..1，不再按分片数跳变
           setState(() {
             _cacheDone = doneBytes;
             _cacheTotal = totalBytes;
@@ -250,7 +223,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
           _caching = false;
         });
       } else {
-        // 缓存失败/取消：回落为直接网络播放
         setState(() {
           _caching = false;
           _cancelCache = false;
@@ -272,7 +244,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       if (!mounted) return;
       setState(() => _loading = false);
 
-      // ---- 统计：记录一次视频观看 ----
       if (!_statRecorded) {
         _statRecorded = true;
         _lastStatPosition = c.value.position.inMilliseconds;
@@ -288,7 +259,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         _error = L.tp('playFailed', {'e': e});
       });
     } finally {
-      // 无论成功失败都解除「切换中」；失败的集数可以再点一次重试
       _switching = false;
     }
   }
@@ -297,12 +267,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     final v = _c?.value;
     if (v == null || !mounted) return;
 
-    // ---- 统计：按实际播放增量累计时长 ----
     if (v.isPlaying) {
       final cur = v.position.inMilliseconds;
       final delta = cur - _lastStatPosition;
-      // 只排除「明显拖动」造成的跳变（>15s），
-      // 缓冲卡顿后的正常增量要照常累计，否则时长永远为 0。
       if (delta > 0 && delta < 15000) {
         final sec = delta ~/ 1000;
         if (sec > 0) {
@@ -318,7 +285,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       _autoNext();
       return;
     }
-    // 每 5 秒保存一次进度
     final ms = v.position.inMilliseconds;
     if ((ms ~/ 5000) != (_lastSavedBucket)) {
       _lastSavedBucket = ms ~/ 5000;
@@ -354,12 +320,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       final ms = c.value.position.inMilliseconds;
       final dur = c.value.duration.inMilliseconds;
       if (dur > 0 && ms >= dur - 2000) {
-        await sp.remove(_progressKey); // 看完清掉
+        await sp.remove(_progressKey);
       } else if (ms > 1000) {
         await sp.setInt(_progressKey, ms);
       }
-      // 同步写阅读历史（kind = video）：用「秒」当页单位，
-      // 这样历史里也能算出「看了多少 / 共多少」的占比。
       if (dur > 0) {
         AppState.instance.recordHistory(
           ReadHistoryEntry(
@@ -389,8 +353,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       _load(id: '${list[next]['id']}', title: '${list[next]['title'] ?? ''}');
     }
   }
-
-  // ---------------- 控制 ----------------
 
   void _scheduleHide() {
     _hideTimer?.cancel();
@@ -476,7 +438,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   }
-  /// 字节 → 人类可读（缓存进度用）。
   String _fmtBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
@@ -494,8 +455,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     return h > 0 ? '$h:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
   }
 
-  // ---------------- UI ----------------
-
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
@@ -506,7 +465,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
             child: _buildVideoLayer(),
           );
 
-    // 信息面板固定浅色主题，避免跟随系统深色导致整页发黑
     final lightTheme = ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(
@@ -516,8 +474,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     );
 
     return PopScope(
-      // 全屏时拦截系统返回：先退出全屏，而不是直接 pop 掉播放页
-      // （否则会一路退回详情页的上一页）
       canPop: !_fullscreen,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
@@ -532,10 +488,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
             ? videoArea
             : Column(
                 children: [
-                  // 不再有独立标题栏：标题只保留在播放器控制层里
-                  // （避免出现两行标题）
-                  // 视频区不占满剩余空间：16:9 高度即可，
-                  // 让下方信息面板有足够位置（之前 Expanded 撑太大）
                   AspectRatio(
                     aspectRatio: 16 / 9,
                     child: videoArea,
@@ -556,24 +508,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     );
   }
 
-
-  /// 播放前的缓存蒙层：进度条 + 百分比 + 「边下边播」。
-  ///
-  /// 布局要点（修过两个问题）：
-  ///  * **标题与退出按钮同一行**：以前返回按钮用 `Positioned` 贴在左上，
-  ///    标题在 `Center` 列里，两者基线永远对不齐。现在统一放进顶部 Row。
-  ///  * **按钮不贴底边**：蒙层高度取决于视频区域，内容居中时按钮可能
-  ///    紧贴下沿。改成「顶部标题栏 + 中间信息 + 底部安全间距」，
-  ///    并给整块加 `SafeArea`，任何屏幕比例下都不贴边。
   Widget _buildCacheOverlay() {
-    // 用分片完成比例作为进度（比字节估算稳定）
     final pct = _cacheTotal <= 0 ? 0.0 : _cacheDone / _cacheTotal;
     return Container(
       color: Colors.black.withValues(alpha: 0.55),
       child: SafeArea(
         child: Column(
           children: [
-            // ---- 顶部：返回 + 标题（同一行，垂直居中）----
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 4, 16, 4),
               child: Row(
@@ -606,7 +547,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                 ],
               ),
             ),
-            // ---- 中间：进度信息 ----
             Expanded(
               child: Center(
                 child: SingleChildScrollView(
@@ -641,8 +581,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // 只显示已下载量：HLS 没有准确总大小，
-                          // 用「均值×片数」估算会一直跳动。
                           Text(
                             _fmtBytes(_cacheDone),
                             style: const TextStyle(
@@ -665,12 +603,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                 ),
               ),
             ),
-            // ---- 底部：边下边播（与下边缘留出间距，不再贴边）----
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
               child: OutlinedButton(
                 onPressed: () {
-                  // 放弃缓存，立刻用网络流播放
                   _cancelCache = true;
                   setState(() => _caching = false);
                 },
@@ -709,25 +645,17 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
           _seekRel(10);
         }
       },
-      // 长按临时调倍速：不改动持久化的 _rate，松手即还原
       onLongPressStart: (d) {
         if (_locked || c == null) return;
         _longPressing = true;
-        // 长按**固定以 2 倍速为起点**（与行业通行做法一致：
-        // 长按就是「加速看」，不该跟随用户平时设的倍速）。
-        // 之后左右滑动再以 2x 为基准增减。
         _rateAtLongPress = 2.0;
         c.setPlaybackSpeed(_rateAtLongPress);
         _toast('2.0x');
       },
       onLongPressMoveUpdate: (d) {
         if (!_longPressing || c == null) return;
-        // 按**滑动比例**换算，滑过屏幕宽度 100% 覆盖 0.5x~3.0x 全量程。
-        // 基准点 = 2.0x（长按起点）：右滑加速、左滑减速。
         final w = context.size?.width ?? 400;
         final frac = (d.offsetFromOrigin.dx / w).clamp(-1.0, 1.0);
-        // frac: -1 → 0.5x，0 → 2.0x（起点），+1 → 3.0x
-        // 右滑空间只有 1.0x，左滑有 1.5x，所以两侧斜率分开算。
         final raw = frac >= 0
             ? 2.0 + frac * (3.0 - 2.0)
             : 2.0 + frac * (2.0 - 0.5);
@@ -742,7 +670,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       onLongPressEnd: (_) {
         if (!_longPressing) return;
         _longPressing = false;
-        // 还原为长按前的倍速，不写偏好
         _c?.setPlaybackSpeed(_rate);
         setState(() {
           _hud = null;
@@ -772,7 +699,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         }
       },
       onVerticalDragEnd: (_) {
-        // 亮度持久化到本次会话，退出播放器时恢复系统默认
         _scheduleHide();
       },
       onHorizontalDragStart: (d) {
@@ -836,8 +762,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                   style: const TextStyle(color: Colors.white70)),
             )
           else
-            // 单层 FittedBox 铺满整个视频区（之前嵌套两层，
-            // 外层先按原生尺寸收缩，导致画面填不满、四周留黑边）
             SizedBox.expand(
               child: FittedBox(
                 fit: _fit,
@@ -849,7 +773,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
               ),
             ),
 
-          // 缓冲指示
           if (c != null && c.value.isBuffering && !_loading)
             const Center(
               child: SizedBox(
@@ -862,7 +785,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
               ),
             ),
 
-          // HUD 提示
           if (_hud != null)
             Center(
               child: Container(
@@ -883,7 +805,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
               ),
             ),
 
-          // 拖动进度预览
           if (_seekPreview != null && c != null)
             Center(
               child: Container(
@@ -904,7 +825,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
               ),
             ),
 
-          // 中央播放按钮（暂停时）
           if (c != null && !_loading && _error == null && !c.value.isPlaying)
             Center(
               child: GestureDetector(
@@ -922,7 +842,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
               ),
             ),
 
-          // 顶部栏 + 底部控制条
           if (_showControls && !_loading && _error == null)
             Positioned.fill(child: _buildOverlayControls()),
         ],
@@ -971,7 +890,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
             ],
           ),
           const Spacer(),
-          // 中央控制按钮
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -998,7 +916,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
             ],
           ),
           const Spacer(),
-          // 进度 + 时间
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
@@ -1007,13 +924,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                   _fmt(v.position),
                   style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
-                // 时间与进度条之间留出间距：之前两者紧贴，
-                // 进度条起止点看起来像压在数字上
                 const SizedBox(width: 10),
                 Expanded(
                   child: _BufferedProgressBar(
                     progress: progress.clamp(0.0, 1.0),
-                    // 已缓冲到的位置（灰色段）
                     buffered: total <= 0
                         ? 0.0
                         : (v.buffered.isEmpty
@@ -1034,7 +948,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
               ],
             ),
           ),
-          // 底部工具条
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
             child: Row(
@@ -1067,7 +980,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                     });
                   },
                 ),
-                // 全屏：右下角
                 IconButton(
                   tooltip: _fullscreen
                       ? L.t('exitFullscreen')
@@ -1155,8 +1067,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     );
   }
 
-  // ---------------- 信息面板 ----------------
-
   Widget _buildInfoPanel(MediaQueryData media) {
     final theme = Theme.of(context);
     final video = _info?['video'];
@@ -1173,7 +1083,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
       children: [
-        // 标题栏已显示标题，这里不再重复（避免两行标题）
         const SizedBox(height: 4),
         Wrap(
           spacing: 10,
@@ -1329,14 +1238,11 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
   }
 }
 
-/// 供外部判断是否横屏设备（保留工具，未强制使用）。
 bool get isAndroid => Platform.isAndroid;
 
-/// 带缓冲进度的播放进度条：
-/// 白色 = 已播放，灰色 = 已缓冲未播放，暗色 = 未缓冲。
 class _BufferedProgressBar extends StatefulWidget {
-  final double progress; // 0..1 播放位置
-  final double buffered; // 0..1 缓冲位置
+  final double progress;
+  final double buffered;
   final ValueChanged<double> onSeek;
 
   const _BufferedProgressBar({
@@ -1418,13 +1324,11 @@ class _ProgressPainter extends CustomPainter {
     final barRect = Rect.fromLTWH(0, cy - h / 2, w, h);
     final radius = Radius.circular(h / 2);
 
-    // 未缓冲底轨
     canvas.drawRRect(
       RRect.fromRectAndRadius(barRect, radius),
       Paint()..color = Colors.white24,
     );
 
-    // 已缓冲（灰色）
     final bufW = (w * buffered).clamp(0.0, w);
     if (bufW > 0.5) {
       canvas.drawRRect(
@@ -1436,7 +1340,6 @@ class _ProgressPainter extends CustomPainter {
       );
     }
 
-    // 已播放（白色）
     final progW = (w * progress).clamp(0.0, w);
     if (progW > 0.5) {
       canvas.drawRRect(
@@ -1448,7 +1351,6 @@ class _ProgressPainter extends CustomPainter {
       );
     }
 
-    // 滑块圆点
     canvas.drawCircle(
       Offset(progW, cy),
       thumbRadius,

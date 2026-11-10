@@ -23,7 +23,6 @@ import '../widgets/novel_tts_sheet.dart';
 import '../widgets/novel_typography_sheet.dart';
 import '../widgets/novel_menu_overlay.dart';
 
-/// 小说详情页：封面、简介、标签、章节列表（来自 `novel` 详情的 series 字段）。
 class NovelDetailPage extends StatefulWidget {
   final String nid;
   final String title;
@@ -49,7 +48,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
   int _resumeIndex = 0;
   bool _resumeLoaded = false;
 
-  /// 本地收藏状态
   bool _novelFav = false;
 
   @override
@@ -59,7 +57,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
     _load();
   }
 
-  /// 收藏 / 取消收藏（本地优先，百分百成功）。
   Future<void> _toggleNovelFav() async {
     final target = !_novelFav;
     setState(() => _novelFav = target);
@@ -75,7 +72,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
       target,
     );
     if (!mounted) return;
-    // 与漫画详情页统一：自绘 Toast（有入场/出场动画）
     AppToast.show(
       context,
       target ? L.t('favorited') : L.t('unfavorited'),
@@ -150,34 +146,15 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
         ],
       ),
       body: ListView(
-        // 不再让整个 body 等接口：首帧就用**列表页带来的**封面/标题渲染，
-        // 这样 Hero 转场有落点，封面能一路飞进详情页。
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
         children: [
-          // 头部：左侧封面 + 右侧信息。
-          //
-          // # 为什么用固定高度而不是 IntrinsicHeight
-          //
-          // 之前用 `IntrinsicHeight + spaceBetween`：右侧标题行数变化
-          // （加载前只有列表页带来的短标题，加载完变成完整长标题 → 从 1 行
-          // 变 2 行）会撑高整个 Row，于是封面被往下推、Hero 落地后又「上移」，
-          // 用户看到明显的跳变。
-          //
-          // 现在整块高度**钉死**为封面高度（139），内部一律不溢出：
-          //  * 右侧标题固定最多 2 行
-          //  * 作者 / 播放量单行省略
-          //  * 按钮贴底
-          // 无论加载前后，封面位置都完全不动。
           SizedBox(
             height: 139,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Hero(
-                  // 与列表项封面的 tag 对应
                   tag: 'novel_${widget.nid}',
-                  // 飞行层用与详情页**完全相同**的圆角（10），
-                  // 这样落地瞬间不会从 6 跳到 10 而产生「到位后才跳变」。
                   flightShuttleBuilder: (ctx, anim, dir, from, to) {
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(10),
@@ -205,15 +182,12 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    // 标题组在上、按钮贴底：两者之间用 Spacer 吃掉剩余空间，
-                    // 整块高度由外层 SizedBox 钉死，不会被内容撑开。
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // 标题最多两行：多了就省略，不去挤按钮
                           Text(
                             _displayTitle,
                             maxLines: 2,
@@ -271,10 +245,7 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                           ],
                         ],
                       ),
-                      // 吃掉标题组与按钮之间的剩余空间，
-                      // 让按钮贴住封面底沿（整块高度已被钉死，不会溢出）
                       const Spacer(),
-                      // 按钮：与封面底边对齐
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
@@ -302,14 +273,8 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
               ],
             ),
           ),
-          // ---- 标签 / 简介：未加载时用灰块占位 ----
-          //
-          // 之前这里是「什么都不画」，等接口回来才突然插入整段简介 +
-          // 标签 + 章节列表，把下面的内容整体推下去（用户看到「跳」）。
-          // 现在先用灰色占位撑住同样的高度，数据到了原地替换。
           if (_detail == null) ...[
             const SizedBox(height: 14),
-            // 标签占位（两枚灰胶囊）
             Row(
               children: const [
                 ShimmerBox(width: 56, height: 22, radius: 11),
@@ -318,7 +283,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
               ],
             ),
             const SizedBox(height: 16),
-            // 简介占位（四行）
             const ShimmerBox(height: 13, radius: 4),
             const SizedBox(height: 7),
             const ShimmerBox(height: 13, radius: 4),
@@ -403,8 +367,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // 章节还在加载时的占位（不再是整页转圈，
-                // 详情内容与封面先出来，用户能立刻看到"这是什么"）
                 if (_detail == null)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 24),
@@ -461,7 +423,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
   }
 
   void _open(int index) {
-    // 带入该章的阅读进度，实现「继续阅读」
     final p = ReaderStore.instance.progress(widget.nid);
     final ratio = (p != null && p.chapterIndex == index) ? p.ratio : null;
     Navigator.of(context).push(
@@ -471,7 +432,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
           chapters: _chapters,
           index: index,
           initialRatio: ratio,
-          // 带上标题与封面，阅读页写历史时才不是空白
           novelTitle: _displayTitle,
           cover: _coverUrl,
         ),
@@ -480,20 +440,14 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
   }
 }
 
-/// 小说阅读页（参照 legado / KOReader 的能力集）：
-/// 分页/滚动双模式、翻页动画、排版面板、主题、目录、书内搜索、
-/// 书签、划线批注、TTS 朗读、进度记忆、阅读时长统计、亮度/常亮。
 class NovelReadPage extends StatefulWidget {
   final String nid;
   final List<Map<String, dynamic>> chapters;
 
-  /// 作品标题（写阅读历史用；为空时历史里显示空名）
   final String novelTitle;
 
-  /// 作品封面（写阅读历史用）
   final String? cover;
 
-  /// 上次读到的章内比例（0~1）。null = 从头开始。
   final double? initialRatio;
   final int index;
 
@@ -517,54 +471,39 @@ class _NovelReadPageState extends State<NovelReadPage>
   final _settings = ReaderSettings.instance;
   final _store = ReaderStore.instance;
 
-  // ---- 当前章节 ----
   late int _index;
   Map<String, dynamic>? _data;
   String _text = '';
   bool _loading = true;
   String? _error;
 
-  /// 当前章是否命中本地缓存
   bool _cacheHit = false;
 
-  /// 当前章是否正在写入缓存
   bool _cachingNow = false;
 
-  /// 是否已注册过重排回调（防止 build 内重复注册导致递归）
   bool _rebuildScheduled = false;
 
-  /// 是否正在追加下一话（滚动到底自动续读时防止重复触发）
   bool _appendingNext = false;
 
-  /// 是否已还原过初始进度（只做一次）
   bool _restoredOnce = false;
 
-  // ---- 无缝拼接 ----
-  /// 合并后的全文（当前章 + 已预取的后续章节）
   String _mergedText = '';
 
-  /// 合并文本中每章的起始偏移：[{index, start, title}]
   final List<({int index, int start, String title})> _chapterStarts = [];
 
-  /// 已合并进来的最后一章索引
   int _mergedUpto = -1;
 
-  /// 是否正在扩展合并文本
   bool _extending = false;
 
-  // ---- 分页状态 ----
   final List<PageSlice> _pages = [];
   int _page = 0;
   Size _pageArea = Size.zero;
 
-  // ---- 滚动模式 ----
   final _scroll = ScrollController();
   double _scrollRatio = 0;
 
-  // ---- UI 状态 ----
   bool _showMenu = false;
 
-  /// 菜单进出动画（1 = 完全展开，0 = 完全收起）
   late final AnimationController _menuCtrl = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 240),
@@ -576,21 +515,17 @@ class _NovelReadPageState extends State<NovelReadPage>
   List<({int chapterIndex, String chapterTitle, int offset, String excerpt})>
       _searchHits = [];
 
-  // ---- 选中/批注 ----
   int? _selStart;
   int? _selEnd;
   TextPainter? _painter;
 
-  // ---- TTS ----
   bool _ttsOn = false;
 
-  /// 自动滚动开关与计时器
   bool _autoScrollOn = false;
   Timer? _autoScrollTimer;
   double _ttsRate = 1.0;
   int _ttsCursor = 0;
 
-  // ---- 统计 ----
   Timer? _statTimer;
   int _statAccum = 0;
 
@@ -637,7 +572,6 @@ class _NovelReadPageState extends State<NovelReadPage>
   void _onSettings() {
     if (!mounted) return;
     setState(() {});
-    // 排版参数（字号/行距/边距等）变化后需要重排
     _scheduleRebuild();
   }
 
@@ -648,8 +582,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       if (v != null && mounted) setState(() => _ttsRate = v);
     } catch (_) {}
   }
-
-  // ---------------- 阅读时长 ----------------
 
   void _startStatTimer() {
     _statTimer = Timer.periodic(const Duration(seconds: 10), (_) {
@@ -662,8 +594,6 @@ class _NovelReadPageState extends State<NovelReadPage>
   void _flushStat() {
     if (_statAccum > 0) _statAccum = 0;
   }
-
-  // ---------------- 加载 ----------------
 
   String _langCode() {
     switch (AppState.instance.lang) {
@@ -699,7 +629,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       _selEnd = null;
     });
     try {
-      // ---- 先缓存再看：命中本地缓存直接读取 ----
       final ncid = _chapterKey;
       final cached = await NovelCacheManager.instance.get(widget.nid, ncid);
       if (cached != null && '${cached['text'] ?? ''}'.isNotEmpty) {
@@ -711,7 +640,6 @@ class _NovelReadPageState extends State<NovelReadPage>
           _cacheHit = true;
           _cachingNow = false;
         });
-        // 命中缓存：同样构建合并文本
         _mergedText = '${cached['text']}';
         _chapterStarts.clear();
         _chapterStarts.add((
@@ -730,7 +658,6 @@ class _NovelReadPageState extends State<NovelReadPage>
         return;
       }
 
-      // 未命中：下载后落盘，再显示（保证「先缓存再看」）
       setState(() {
         _cacheHit = false;
         _cachingNow = true;
@@ -743,15 +670,13 @@ class _NovelReadPageState extends State<NovelReadPage>
       final raw = _htmlToText('${d?['content'] ?? ''}');
       if (!mounted) return;
 
-      // 流式：先立刻渲染正文，不等加密落盘
       setState(() {
         _data = d;
         _text = raw;
         _loading = false;
-        _cachingNow = raw.isNotEmpty; // 后台写盘中
+        _cachingNow = raw.isNotEmpty;
         _cacheHit = false;
       });
-      // 构建合并文本：本章 + 后续预取章节（实现无缝续读）
       _mergedText = raw;
       _chapterStarts.clear();
       _chapterStarts.add((
@@ -761,7 +686,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       ));
       _mergedUpto = _index;
       if (raw.isNotEmpty) {
-        // 后台补齐后续章节并重新分页
         unawaited(() async {
           await _extendMerged(count: 3);
           if (mounted) _scheduleRebuild();
@@ -770,19 +694,15 @@ class _NovelReadPageState extends State<NovelReadPage>
 
       _scheduleRebuild();
       _saveProgress();
-      // 统计：记录一次小说阅读（按类型 'novel'）
       if (raw.isNotEmpty) {
         ReadingStats.instance.recordChapter(
           type: StatType.novel,
           workId: widget.nid,
         );
-        // 写入阅读历史：之前小说**从不写历史**，所以历史列表里
-        // 永远没有小说、也就谈不上「保存进度」。
         _recordHistory(ncid, raw);
       }
       if (_scroll.hasClients) _scroll.jumpTo(0);
 
-      // 后台写入加密缓存（不阻塞阅读）
       if (raw.isNotEmpty) {
         unawaited(() async {
           try {
@@ -814,13 +734,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     }
   }
 
-
-  /// 后台预取下一章（动态加载）：静默下载并落盘，翻页时直接命中。
-  ///
-  /// 顺序约定：始终只预取「当前章 + 1」，因此缓存推进必然是
-  /// 从第一章往后连续进行，不会出现随机顺序。
-
-  /// 预取后续 [count] 章并拼接到合并文本。
   Future<void> _extendMerged({int count = 3}) async {
     if (_extending) return;
     _extending = true;
@@ -848,21 +761,18 @@ class _NovelReadPageState extends State<NovelReadPage>
               );
             }
           } catch (_) {
-            break; // 网络失败则停止续接
+            break;
           }
         }
         if (body.isEmpty) break;
 
-        // 记录本章在合并文本中的起点
         _chapterStarts.add((
           index: i,
           start: _mergedText.length,
           title: title,
         ));
-        // 章间插入分隔（标题 + 空行）
         if (_mergedText.isNotEmpty) {
           _mergedText += '\n\n\u2014\u2014 $title \u2014\u2014\n\n';
-          // 起点应为标题之后
           final last = _chapterStarts.removeLast();
           _chapterStarts.add((
             index: last.index,
@@ -879,7 +789,6 @@ class _NovelReadPageState extends State<NovelReadPage>
   }
 
   Future<void> _prefetchNext() async {
-    // 用户可关闭自动预取（省流量/省电）
     if (!AppState.instance.prefetchNextChapter) return;
     final next = _index + 1;
     if (next >= widget.chapters.length) return;
@@ -899,7 +808,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     } catch (_) {}
   }
 
-  /// HTML → 纯文本（保留段落）。
   String _htmlToText(String html) {
     if (html.trim().isEmpty) return '';
     var s = html;
@@ -926,9 +834,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     return s.trim();
   }
 
-  // ---------------- 分页 ----------------
-
-  /// 安排一次重排（幂等）：同一帧内多次调用只会执行一次。
   void _scheduleRebuild() {
     if (_loading) return;
     if (_settings.pageMode == PageMode.scroll) return;
@@ -943,7 +848,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     });
   }
 
-  /// 首次渲染后，把阅读位置还原到上次保存的比例。
   void _restoreInitialRatioOnce() {
     if (_restoredOnce) return;
     final ratio = widget.initialRatio;
@@ -967,7 +871,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     });
   }
 
-  /// 分页所用的正文：优先用合并文本（无缝续读），否则用单章文本
   String get _pageSource =>
       _mergedText.isNotEmpty ? _mergedText : _text;
 
@@ -977,8 +880,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     if (_pageArea.width <= 0 || _pageArea.height <= 0) return;
     final style = _settings.textStyleFor(_theme);
     final w = _pageArea.width - _settings.marginH * 2;
-    // 顶部扣掉状态栏，底部扣掉进度栏，避免正文被遮挡/离得太远
-    // SafeArea 已避开状态栏，这里只扣边距与进度栏
     final bottomInset = _settings.showProgress ? 34.0 : 0.0;
     final h = _pageArea.height - _settings.marginV * 2 - bottomInset;
     if (w <= 0 || h <= 0) return;
@@ -994,8 +895,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       indentEm: _settings.indent,
     );
 
-
-    // 尝试恢复章节内进度
     final prev = _store.progress(widget.nid);
     var startPage = 0;
     if (prev != null && prev.chapterIndex == _index && pages.isNotEmpty) {
@@ -1009,8 +908,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       _page = startPage;
     });
   }
-
-  // ---------------- 进度 ----------------
 
   double get _chapterRatio {
     if (_settings.pageMode == PageMode.scroll) return _scrollRatio;
@@ -1027,7 +924,6 @@ class _NovelReadPageState extends State<NovelReadPage>
         chapterTitle: _chapterTitle,
       );
     } catch (_) {}
-    // 同步刷新阅读历史里的页码（页号用「当前页 / 总页」近似）
     final total = _pages.isEmpty ? 0 : _pages.length;
     final cur = _pages.isEmpty ? 0 : (_page + 1).clamp(0, total);
     AppState.instance.updateHistoryProgress(
@@ -1038,7 +934,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     );
   }
 
-  /// 把当前小说章节写入阅读历史（kind = novel）。
   void _recordHistory(String ncid, String text) {
     final total = _pages.isEmpty ? 0 : _pages.length;
     AppState.instance.recordHistory(
@@ -1057,7 +952,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     );
   }
 
-  /// 进度文案：分页模式显示「页/总页」，滚动模式显示百分比
   String _pageLabel() {
     if (_settings.pageMode == PageMode.scroll) {
       return '${(_scrollRatio * 100).toStringAsFixed(0)}%';
@@ -1066,10 +960,8 @@ class _NovelReadPageState extends State<NovelReadPage>
     return '${_page + 1}/${_pages.length}';
   }
 
-  /// 跳转到指定页（滑块拖动用）
   void _turnTo(int index) {
     if (_settings.pageMode == PageMode.scroll) {
-      // 滚动模式：按比例滚到对应位置
       if (!_scroll.hasClients || _pages.isEmpty) return;
       final ratio = _pages.length <= 1
           ? 0.0
@@ -1087,7 +979,6 @@ class _NovelReadPageState extends State<NovelReadPage>
   }
 
   void _turnPage(int delta) {
-    // 滚动模式：按「一屏高度」滚动，而不是直接返回
     if (_settings.pageMode == PageMode.scroll) {
       if (!_scroll.hasClients) return;
       final viewport = _scroll.position.viewportDimension;
@@ -1106,17 +997,13 @@ class _NovelReadPageState extends State<NovelReadPage>
       _saveProgress();
       return;
     }
-    // 越界：自动衔接上一话 / 下一话（全话连续阅读，无需手动切换）
     final ni = _index + delta;
     if (ni < 0 || ni >= widget.chapters.length) return;
     _load(jumpToChapter: ni);
   }
 
-  // ---------------- 菜单动作 ----------------
-
   void _toggleMenu() {
     if (_showMenu) {
-      // 收起：反向滑出，动画结束后再移除
       _menuCtrl.reverse().then((_) {
         if (!mounted) return;
         setState(() {
@@ -1148,8 +1035,6 @@ class _NovelReadPageState extends State<NovelReadPage>
         createdAt: DateTime.now().millisecondsSinceEpoch,
       ),
     );
-    // 同时写入**全局章节书签**：这样小说书签也能在书架「书签」页
-    // 和漫画书签一起统一浏览（含页码与批注）。
     await AppState.instance.setChapterBookmark(
       comicId: widget.nid,
       chapterId: _chapterKey,
@@ -1180,7 +1065,6 @@ class _NovelReadPageState extends State<NovelReadPage>
         <({int chapterIndex, String chapterTitle, int offset, String excerpt})>[];
     final lock = Object();
 
-    // 并发拉取（限流 4），已缓存章节直接读本地，避免打爆服务端
     var cursor = 0;
 
     Future<void> worker() async {
@@ -1194,7 +1078,6 @@ class _NovelReadPageState extends State<NovelReadPage>
 
         String text = '';
         try {
-          // 优先读本地缓存
           final cached = await NovelCacheManager.instance.get(widget.nid, ncid);
           if (cached != null && '${cached['text'] ?? ''}'.isNotEmpty) {
             text = '${cached['text']}';
@@ -1246,9 +1129,7 @@ class _NovelReadPageState extends State<NovelReadPage>
     });
   }
 
-  /// 极简同步锁：保证并发写 hits 时不会错乱。
   void synchronized(Object lock, void Function() fn) {
-    // Dart 单线程事件循环下，同步代码块本身即为原子操作
     fn();
   }
 
@@ -1265,7 +1146,6 @@ class _NovelReadPageState extends State<NovelReadPage>
   }
 
   void _pageOfOffset(int offset) {
-    // 滚动模式：按「字符偏移占全文的比例」滚动到对应位置
     if (_settings.pageMode == PageMode.scroll) {
       if (!_scroll.hasClients) return;
       final total = _pageSource.length;
@@ -1284,10 +1164,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     if (i >= 0 && mounted) setState(() => _page = i);
   }
 
-  // ---------------- TTS ----------------
-
-  /// 朗读按钮：已开 → 停止；未开 → 先打开设置面板再开始
-  /// 自动滚动：定时器按速度推进滚动位置。
   void _toggleAutoScroll() {
     if (_autoScrollOn) {
       _autoScrollTimer?.cancel();
@@ -1295,13 +1171,11 @@ class _NovelReadPageState extends State<NovelReadPage>
       setState(() => _autoScrollOn = false);
       return;
     }
-    // 分页模式下自动滚动无意义，先切到滚动模式
     if (_settings.pageMode != PageMode.scroll) {
       _settings.update(() => _settings.pageMode = PageMode.scroll);
       _rebuildPages();
     }
     setState(() => _autoScrollOn = true);
-    // 每 50ms 推进一次，速度来自设置（像素/秒）
     _autoScrollTimer =
         Timer.periodic(const Duration(milliseconds: 50), (_) {
       if (!mounted || !_autoScrollOn) return;
@@ -1310,7 +1184,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       final next = _scroll.offset + step;
       final max = _scroll.position.maxScrollExtent;
       if (next >= max) {
-        // 到底：尝试追加下一话
         _maybeLoadNextOnScroll(max, max);
         return;
       }
@@ -1358,22 +1231,16 @@ class _NovelReadPageState extends State<NovelReadPage>
       if (mounted) _toast(L.t('ttsUnavailable'));
       return;
     }
-    // 应用已保存的朗读参数
     await ReaderNative.instance.ttsSetRate(_settings.ttsRate);
     await ReaderNative.instance.ttsSetPitch(_settings.ttsPitch);
     if (_settings.ttsVoiceName.isNotEmpty) {
       await ReaderNative.instance.ttsSetVoice(_settings.ttsVoiceName);
     }
-    // 从「当前屏幕第一个可见字」开始朗读
     _ttsCursor = _visibleStartOffset();
     setState(() => _ttsOn = true);
     _speakFrom(_ttsCursor);
   }
 
-  /// 当前屏幕可见内容的起始字符偏移。
-  ///
-  /// - 分页模式：当前页起点
-  /// - 滚动模式：按滚动比例换算到全文字符位置，并退到段落起点
   int _visibleStartOffset() {
     final src = _pageSource;
     if (src.isEmpty) return 0;
@@ -1392,7 +1259,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     if (!_ttsOn) return;
     final chunk = _text.substring(math.min(offset, _text.length));
     if (chunk.trim().isEmpty) {
-      // 本章读完 → 下一章
       if (_index < widget.chapters.length - 1) {
         _load(jumpToChapter: _index + 1).then((_) {
           _ttsCursor = 0;
@@ -1405,7 +1271,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       }
       return;
     }
-    // 一次最多播 400 字，播完继续
     final piece = chunk.length > 400 ? chunk.substring(0, 400) : chunk;
     ReaderNative.instance.onUtteranceDone = () {
       if (!mounted || !_ttsOn) return;
@@ -1433,9 +1298,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     }
   }
 
-
-  // ---------------- 选中与批注 ----------------
-
   void _handleSelection(TextSelection sel) {
     if (sel.isCollapsed) {
       setState(() {
@@ -1444,7 +1306,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       });
       return;
     }
-    // 选区偏移相对当前页文本 → 转全局
     final base = _pages.isNotEmpty ? _pages[_page].start : 0;
     setState(() {
       _selStart = base + sel.start;
@@ -1504,14 +1365,9 @@ class _NovelReadPageState extends State<NovelReadPage>
     );
   }
 
-  // ---------------- 构建 ----------------
-
   @override
   Widget build(BuildContext context) {
     final bg = _theme.bg;
-    // 阅读器主题可能和 App 主题不同（例如 App 深色 + 阅读米色），
-    // 因此这里按「阅读主题」的亮度单独声明状态栏样式，
-    // 避免状态栏图标与正文底色割裂。
     final readerIsDark = bg.computeLuminance() < 0.5;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -1527,15 +1383,10 @@ class _NovelReadPageState extends State<NovelReadPage>
       ),
       child: Scaffold(
       backgroundColor: bg,
-      // 用 SafeArea 让正文避开状态栏（比手动累加 padding 可靠，
-      // 之前直接算 MediaQuery.padding.top 仍会被遮挡）
       body: SafeArea(
         bottom: false,
         child: LayoutBuilder(
         builder: (context, constraints) {
-          // 只记录尺寸（纯赋值，无副作用）。
-          // 真正的重排由 _scheduleRebuild() 在明确时机触发，
-          // 避免在 build 里注册回调造成递归重排。
           final size = Size(constraints.maxWidth, constraints.maxHeight);
           if (size != _pageArea) {
             _pageArea = size;
@@ -1667,8 +1518,6 @@ class _NovelReadPageState extends State<NovelReadPage>
         child: Text(L.t('needLoginBuy'), style: TextStyle(color: _theme.subtle)),
       );
     }
-    // 正文渲染交给独立的 NovelTextView（分页 / 滚动两种模式内部处理），
-    // 外层再套翻页动画
     return _withPageAnimation(
       NovelTextView(
       settings: _settings,
@@ -1681,7 +1530,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       highlightRanges: _currentHighlightRanges(),
       onTurn: _turnPage,
       onTap: () {
-        // 用户主动操作 → 暂停自动滚动
         _stopAutoScroll();
         _toggleMenu();
       },
@@ -1700,13 +1548,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     );
   }
 
-  /// 翻页动画包装：按 PageMode 为每页加上切换效果。
-  ///
-  /// 解耦后动画曾丢失，这里恢复：
-  /// - slide：横向滑动
-  /// - cover：新页从右覆盖旧页
-  /// - none：无动画
-  /// - scroll：不需要（整章连续滚动）
   Widget _withPageAnimation(Widget child) {
     if (_settings.pageMode == PageMode.scroll) return child;
 
@@ -1721,7 +1562,7 @@ class _NovelReadPageState extends State<NovelReadPage>
           switchOutCurve: Curves.linear,
           transitionBuilder: (c, animation) {
             final incoming = c.key == ValueKey('pg$_page');
-            if (!incoming) return c; // 旧页定格，被新页覆盖
+            if (!incoming) return c;
             return SlideTransition(
               position: Tween<Offset>(
                 begin: const Offset(1, 0),
@@ -1780,13 +1621,11 @@ class _NovelReadPageState extends State<NovelReadPage>
     }
   }
 
-  /// 当前页（或滚动位置）对应的高亮范围。
   List<({int start, int end, Color color, bool underline})>
       _currentHighlightRanges() {
     final anns = _store.annotations(widget.nid, chapterKey: _chapterKey);
     if (anns.isEmpty) return const [];
 
-    // 滚动模式：全文范围；分页模式：当前页范围
     int baseStart = 0;
     int baseEnd = _pageSource.length;
     if (_settings.pageMode != PageMode.scroll && _pages.isNotEmpty) {
@@ -1845,9 +1684,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       ],
     );
   }
-
-  // ---- 分页模式 ----
-
 
   Widget _buildSelectionMenu(
     BuildContext context,
@@ -1918,17 +1754,9 @@ class _NovelReadPageState extends State<NovelReadPage>
     Color(0xFFE91E63),
   ];
 
-  // ---- 滚动模式 ----
-
-  /// 滚动模式下，接近底部时自动加载下一话（连续阅读）。
-  /// 滚动接近底部时，把下一话**追加**到当前正文末尾。
-  ///
-  /// 注意：不是 `_load(jumpToChapter)`（那会替换正文、把用户传送走），
-  /// 而是延长 `_mergedText` 并重新分页，滚动位置保持不变。
   void _maybeLoadNextOnScroll(double pixels, double maxExtent) {
     if (_settings.pageMode != PageMode.scroll) return;
     if (maxExtent <= 0) return;
-    // 距底部 200px 内开始预加载，保证无缝
     if (pixels < maxExtent - 200) return;
     if (_mergedUpto >= widget.chapters.length - 1) return;
     if (_appendingNext) return;
@@ -1938,7 +1766,6 @@ class _NovelReadPageState extends State<NovelReadPage>
 
     _appendNextChapter().whenComplete(() {
       _appendingNext = false;
-      // 追加后内容变长，保持原阅读位置不跳
       if (keepOffset != null && mounted && _scroll.hasClients) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || !_scroll.hasClients) return;
@@ -1949,7 +1776,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     });
   }
 
-  /// 把下一话正文拼接到 `_mergedText` 末尾（带分隔线）。
   Future<void> _appendNextChapter() async {
     final next = _mergedUpto + 1;
     if (next >= widget.chapters.length) return;
@@ -1958,7 +1784,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     if (ncid.isEmpty) return;
     final nextTitle = '${widget.chapters[next]['title'] ?? ''}';
 
-    // 取正文：优先缓存，否则网络
     var body = '';
     try {
       final cached = await NovelCacheManager.instance.get(widget.nid, ncid);
@@ -1984,7 +1809,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     if (body.isEmpty || !mounted) return;
 
     setState(() {
-      // 章间分隔线
       _mergedText += '\n\n\n'
           '──────── $nextTitle ────────'
           '\n\n';
@@ -1998,18 +1822,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     });
     _scheduleRebuild();
   }
-
-
-  // ---- 菜单 ----
-
-
-
-  // ---- 目录 / 搜索抽屉 ----
-
-
-
-
-  // ---- 设置面板 ----
 
   void _showSettingsSheet() {
     showModalBottomSheet<void>(
@@ -2035,7 +1847,6 @@ class _NovelReadPageState extends State<NovelReadPage>
     );
   }
 
-
   void _showThemeSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -2048,7 +1859,6 @@ class _NovelReadPageState extends State<NovelReadPage>
       ),
     );
   }
-
 
   void _showPageModeSheet() {
     final modes = [

@@ -10,10 +10,6 @@ import '../widgets/common_widgets.dart';
 import 'unified_detail_page.dart';
 import 'unified_home_page.dart';
 
-/// 「我的评论」：列出当前账号发过的全部评论（含作品评论与聊天区发言）。
-///
-/// 服务端 `forum` 接口支持 `uid` 过滤，因此不需要本地记录 —— 换设备登录
-/// 也能看到全部历史。每条评论可删除（调用 `comment_delete`）。
 class MyCommentsPage extends StatefulWidget {
   const MyCommentsPage({super.key});
 
@@ -33,7 +29,6 @@ class _MyCommentsPageState extends State<MyCommentsPage> {
   bool _hasMore = true;
   String? _error;
 
-  /// 正在删除的评论 id（防重复点击）
   final Set<String> _deleting = {};
 
   @override
@@ -95,7 +90,6 @@ class _MyCommentsPageState extends State<MyCommentsPage> {
         _items.addAll(list);
         _total = total;
         _page++;
-        // 服务端每页 10 条；用「本页拿满 & 未到 total」判断还有没有下一页
         _hasMore = list.isNotEmpty &&
             list.length >= 10 &&
             (total <= 0 || _items.length < total);
@@ -158,7 +152,6 @@ class _MyCommentsPageState extends State<MyCommentsPage> {
     }
   }
 
-  /// 打开该评论所属的作品（聊天区发言没有 AID，返回 null）。
   void _openComic(Map<String, dynamic> c) {
     final aid = '${c['AID'] ?? c['aid'] ?? ''}';
     if (aid.isEmpty || aid == 'null' || aid == '0') return;
@@ -171,10 +164,8 @@ class _MyCommentsPageState extends State<MyCommentsPage> {
     );
   }
 
-  /// 评论内容是 HTML 片段（`<div style=...>文本</div>`），去标签取纯文本。
   String _plain(String html) {
     var s = html;
-    // <br> / </div> / </p> 视为换行，其余标签直接去掉
     s = s.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
     s = s.replaceAll(
       RegExp(r'</(?:div|p|li)>', caseSensitive: false),
@@ -293,7 +284,6 @@ class _MyCommentsPageState extends State<MyCommentsPage> {
     final cid = '${c['CID'] ?? c['cid'] ?? ''}';
     final aid = '${c['AID'] ?? c['aid'] ?? ''}';
     final hasComic = aid.isNotEmpty && aid != 'null' && aid != '0';
-    // 作品评论：name 是 "JM123456" 这种；聊天区发言没有 name
     final rawName = '${c['name'] ?? ''}';
     final text = _plain('${c['content'] ?? ''}');
     final likes = int.tryParse('${c['likes'] ?? 0}') ?? 0;

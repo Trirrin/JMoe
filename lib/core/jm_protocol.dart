@@ -9,15 +9,6 @@ import 'app_state.dart';
 import 'package:pointycastle/export.dart';
 import 'l10n.dart';
 
-
-/// JMComic3 客户端协议实现。
-///
-/// 逆向自 `www.jmcomico3.cn` 分发的 2.1.12 客户端（Capacitor + React 包）：
-///  * 请求头 `Tokenparam: <unix秒>,<版本>`、`Token: md5(<unix秒> + "185Hcomic3PAPP7R")`
-///  * 响应 `data` 字段为 AES/ECB/PKCS7 密文（base64），
-///    密钥 = md5(时间戳 + "185Hcomic3PAPP7R") 或 md5("18comicAPPContent")
-///    广告接口用 md5("ad_content_all")
-///  * 线路表来自 `newsvr-2025.txt`（AES-ECB，密钥 md5("diosfjckwpqpdfjkvnqQjsik")）
 class JmProtocol {
   static const String tokenKey = '185Hcomic3PAPP7R';
   static const String altTokenKey = '18comicAPPContent';
@@ -29,7 +20,6 @@ class JmProtocol {
   static const String backupHostConfigUrl =
       'https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr-2025.txt';
 
-  /// 内置兜底线路，所有网络线路都失败时使用。
   static const List<List<String>> builtinHosts = [
     ['www.cdnbtd.cc', '线路1'],
     ['www.cdnutc.cc', '线路2'],
@@ -42,16 +32,12 @@ class JmProtocol {
 
   static String md5Hex(String input) => md5.convert(utf8.encode(input)).toString();
 
-  /// 服务端线路名是繁体（「線路1」），按界面语言做字形转换。
-  /// 简体模式下转为「线路1」，英文模式保留数字。
   static String localizeHostLabel(String label, String uiLang) {
     if (uiLang.startsWith('en')) {
-      // 提取数字，输出 Line N
       final m = RegExp(r'(\d+)').firstMatch(label);
       return m != null ? 'Line ${m.group(1)}' : label;
     }
     if (uiLang.contains('Hant')) return label;
-    // 简体：常用繁体字映射
     const map = {
       '線路': '线路', '線': '线', '路': '路', '臺': '台', '灣': '湾',
       '專': '专', '業': '业', '標': '标', '籤': '签',
@@ -61,7 +47,6 @@ class JmProtocol {
     return out;
   }
 
-  /// AES/ECB/PKCS7 解密（base64 输入）。
   static Uint8List? aesEcbDecryptBase64(String b64, String key) {
     try {
       final keyBytes = utf8.encode(key);
@@ -72,7 +57,6 @@ class JmProtocol {
       for (var offset = 0; offset < data.length; offset += 16) {
         cipher.processBlock(data, offset, out, offset);
       }
-      // PKCS7 去填充
       if (out.isEmpty) return out;
       final pad = out.last;
       if (pad >= 1 && pad <= 16 && pad <= out.length) {
@@ -84,7 +68,6 @@ class JmProtocol {
     }
   }
 
-  /// 解密线路配置文本（`newsvr-2025.txt` 的内容）。
   static Map<String, dynamic>? decodeHostConfig(String raw) {
     final text = raw.replaceAll('\uFEFF', '').trim();
     final key = md5Hex(hostConfigKey);
@@ -97,21 +80,12 @@ class JmProtocol {
     }
   }
 
-  /// 解析响应体：`{"code":200,"data":"<base64 密文>"}` -> 明文 JSON。
   static Map<String, dynamic> decodeResponse(
     dynamic body,
     int timestamp,
     String path,
   ) {
     if (body is String) {
-      // **空响应体 = 成功**。
-      //
-      // 实测 comment_vote（评论点赞）成功时返回 HTTP 200 且 body 只有
-      // 一个换行符，没有任何 JSON。旧的逻辑会 jsonDecode 失败 →
-      // 返回 code:-1 + errorMsg:"\n" → 上层判定失败 →
-      // 用户看到的就是「点赞没反应 / 一直报错」。
-      //
-      // 这里把「空白 body」直接当作成功（code 200、data null）。
       if (body.trim().isEmpty) {
         return {'code': 200, 'data': null};
       }
@@ -127,7 +101,6 @@ class JmProtocol {
     }
     final map = Map<String, dynamic>.from(body);
     final data = map['data'];
-    // 部分接口（如 hot_tags）直接返回明文数组/对象，无需解密
     if (data is List || data is Map) {
       return map;
     }
@@ -148,7 +121,6 @@ class JmProtocol {
           continue;
         }
       }
-      // 兜底：有些接口返回的是未加密的 JSON 字符串
       try {
         map['data'] = jsonDecode(data);
       } catch (_) {
@@ -160,7 +132,6 @@ class JmProtocol {
   }
 }
 
-/// 线路切换 / 重试 / 解密 的 HTTP 客户端。
 class JmApi {
   JmApi._();
 
@@ -169,7 +140,6 @@ class JmApi {
   final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 15),
-      // promote/setting 等接口响应体较大（可达数 MB），需要足够时间
       receiveTimeout: const Duration(seconds: 60),
       sendTimeout: const Duration(seconds: 20),
       followRedirects: true,
@@ -199,7 +169,6 @@ class JmApi {
     }
   }
 
-  /// 只拉取线路表（不测速），供启动页展示。
   Future<void> loadHostList() async {
     for (final url in [
       JmProtocol.primaryHostConfigUrl,
@@ -240,7 +209,6 @@ class JmApi {
     }
   }
 
-  /// 测量单条线路延迟（毫秒）；失败返回 null。
   Future<int?> measure(String hostName,
       {Duration timeout = const Duration(seconds: 6)}) async {
     final sw = Stopwatch()..start();
@@ -265,19 +233,11 @@ class JmApi {
     return null;
   }
 
-  /// 静默切换线路（不额外验证，启动页已测速）。
   Future<void> switchHostQuiet(String hostName) async {
     _baseUrl = 'https://$hostName/';
   }
 
-  /// 拉取线路配置并**并发测速择优**，返回最终选中的线路。
-  ///
-  /// 策略：
-  ///   1. 取线路表（远程配置 → 内置兜底）
-  ///   2. 对所有线路并发 ping（限时），取最快可用者
-  ///   3. 全失败时退回上一次可用线路或首选线路
   Future<void> bootstrap() async {
-    // 1) 线路表
     for (final url in [
       JmProtocol.primaryHostConfigUrl,
       JmProtocol.backupHostConfigUrl,
@@ -316,21 +276,17 @@ class JmApi {
       }
     }
 
-    // 2) 并发测速择优
     final best = await pickFastestHost();
     _baseUrl = 'https://${best ?? hosts.first[0]}/';
     print('[JMOE] bootstrap picked host=' + (_baseUrl ?? ''));
   }
 
-  /// 并发 ping 所有线路，返回延迟最低的 hostName（失败返回 null）。
-  ///
-  /// [timeout] 为整体预算；[preferred] 为上次成功的线路（同延迟时优先）。
   Future<String?> pickFastestHost({
     Duration timeout = const Duration(seconds: 6),
     String? preferred,
   }) async {
     if (hosts.isEmpty) return null;
-    final results = <String, int>{}; // host -> ms
+    final results = <String, int>{};
 
     Future<void> probe(String hostName) async {
       final sw = Stopwatch()..start();
@@ -348,7 +304,6 @@ class JmApi {
               ),
             )
             .timeout(timeout);
-        // 只要有响应（即使 code 异常）也说明线路连通
         if (res.statusCode != null && res.statusCode! < 500) {
           results[hostName] = sw.elapsedMilliseconds;
         }
@@ -363,7 +318,6 @@ class JmApi {
     if (results.isEmpty) return null;
     final sorted = results.entries.toList()
       ..sort((a, b) => a.value.compareTo(b.value));
-    // 上次可用线路若延迟接近最优（差值 <200ms），优先沿用，避免每次启动抖动
     if (preferred != null && results.containsKey(preferred)) {
       final bestMs = sorted.first.value;
       if (results[preferred]! - bestMs < 200) return preferred;
@@ -371,7 +325,6 @@ class JmApi {
     return sorted.first.key;
   }
 
-  /// 手动切换线路，返回是否可用。
   Future<bool> switchHost(String hostName) async {
     final candidate = 'https://$hostName/';
     final ok = await ping(candidate);
@@ -413,12 +366,6 @@ class JmApi {
 
   int _now() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
-  /// 换线路重试专用：把 GET 打到**指定** host 上（不改全局 baseUrl）。
-  ///
-  /// 用于「某个接口在某条线路上稳定 500」的场景 —— 实测 `novelchapters`
-  /// 在 cdnbtd / cdnutc / cdngwc.net 上稳定 500，而 cdngwc.club /
-  /// cdnutc.me 正常返回。这种情况换线重试就能出结果，不该让用户看到
-  /// 「本章内容需要登录或购买后查看」。
   Future<Map<String, dynamic>?> getOnHost(
     String host,
     String path, [
@@ -441,7 +388,6 @@ class JmApi {
         options: Options(
           headers: _headers(ts),
           responseType: ResponseType.json,
-          // 单线路探测不必等太久
           receiveTimeout: const Duration(seconds: 15),
           connectTimeout: const Duration(seconds: 10),
         ),
@@ -459,7 +405,6 @@ class JmApi {
     }
   }
 
-  /// 依次在所有已知线路上重试同一接口，返回第一个成功的结果。
   Future<Map<String, dynamic>?> getWithHostRotation(
     String path, [
     Map<String, dynamic>? params,
@@ -476,12 +421,10 @@ class JmApi {
     return null;
   }
 
-  /// GET 请求（自动解密）。失败时按线路表轮换重试一次。
   Future<Map<String, dynamic>> get(
     String path, [
     Map<String, dynamic>? params,
   ]) async {
-    // 离线模式：不发起任何网络请求
     if (AppState.instance.offlineMode) {
       return {'code': -1, 'errorMsg': 'offline'};
     }
@@ -495,8 +438,6 @@ class JmApi {
     });
 
     Object? lastError;
-    // 网络不佳时重试 4 次（指数退避 300/600/1200ms），
-    // 仍失败则停止，由 UI 提供「点击重试」，避免无休止转圈。
     for (var attempt = 0; attempt < 4; attempt++) {
       final ts = _now();
       try {
@@ -538,12 +479,6 @@ class JmApi {
     };
   }
 
-  /// POST（multipart/form-data），与官方客户端一致。
-  /// 以 **application/x-www-form-urlencoded** 提交。
-  ///
-  /// 与 [post]（multipart）的区别很关键：实测 `like` 接口只接受
-  /// urlencoded 表单，用 multipart 提交会被判成「点讚失败」。
-  /// 所以点赞这类接口必须走这里。
   Future<Map<String, dynamic>> postForm(
     String path, [
     Map<String, dynamic>? params,
@@ -605,7 +540,6 @@ class JmApi {
     String path, [
     Map<String, dynamic>? params,
   ]) async {
-    // 离线模式：不发起任何网络请求
     if (AppState.instance.offlineMode) {
       return {'code': -1, 'errorMsg': 'offline'};
     }
@@ -666,9 +600,7 @@ class JmApi {
     }
   }
 
-  /// 原始字节（图片、下载用）。
   Future<Uint8List?> fetchBytes(String url, {String? referer}) async {
-    // 离线模式：不发起任何网络请求（已缓存的图片走磁盘解密，不经过这里）
     if (AppState.instance.offlineMode) return null;
     try {
       final res = await _dio.get<List<int>>(

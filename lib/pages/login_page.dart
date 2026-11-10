@@ -8,7 +8,6 @@ import '../core/sync_service.dart';
 import '../core/l10n.dart';
 import '../widgets/app_logo.dart';
 
-/// 登录 / 注册 / 找回密码。
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, this.startWithRegister = false});
   final bool startWithRegister;
@@ -63,8 +62,6 @@ class _LoginPageState extends State<LoginPage> {
       } else {
         final r = await service.login(_user.text.trim(), _pass.text);
         if (!mounted) return;
-        // 关键：登录失败时服务端返回 HTTP 401 + code=401 + errorMsg，
-        // 必须严格校验成功态，否则失败也会被当成登录成功而直接退出页面。
         final code = int.tryParse('${r['code']}') ?? -1;
         final data = r['data'];
         final hasSession = data is Map &&
@@ -78,13 +75,10 @@ class _LoginPageState extends State<LoginPage> {
 
         if (code == 200 && data is Map && data.isNotEmpty) {
           final map = Map<String, dynamic>.from(data);
-          // 服务端字段名为 jwttoken（长串 JWT）；s 是 26 位 session id，
-          // 仅作为 Cookie AVS 使用，不可当作 Bearer token。
           final token = '${map['jwttoken'] ?? map['jwt'] ?? map['token'] ?? map['access_token'] ?? ''}';
           final info = map['member'] is Map
               ? Map<String, dynamic>.from(map['member'] as Map)
               : map;
-          // 用户名兜底：接口可能只回 uid，用输入的用户名补上
           info['username'] ??= _user.text.trim();
           JmApi.instance.jwtToken = token;
           JmApi.instance.cookieValue = '${map['s'] ?? info['s'] ?? ''}';
@@ -119,7 +113,6 @@ class _LoginPageState extends State<LoginPage> {
         padding: const EdgeInsets.all(20),
         children: [
           const SizedBox(height: 12),
-          // 显示**应用图标**（与桌面图标同源），不是通用书籍图标
           const Center(child: AppLogo(size: 64)),
           const SizedBox(height: 16),
           Text(

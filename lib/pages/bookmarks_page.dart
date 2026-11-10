@@ -10,11 +10,6 @@ import 'novel_pages.dart';
 import 'unified_home_page.dart';
 import 'unified_reader_page.dart';
 
-/// 书签总览：漫画 / 小说统一展示。
-///
-/// 每条书签记录「作品 + 章节 + 页码 + 批注」：
-///  * 漫画 → 点开直接跳到该话该页
-///  * 小说 → 点开跳到该章该页
 class BookmarksPage extends StatefulWidget {
   const BookmarksPage({super.key});
 
@@ -39,7 +34,6 @@ class _BookmarksPageState extends State<BookmarksPage> {
     if (mounted) setState(() {});
   }
 
-  /// 打开书签对应的位置。
   Future<void> _open(Map<String, dynamic> bm) async {
     final kind = '${bm['kind'] ?? 'comic'}';
     final comicId = '${bm['comicId'] ?? ''}';
@@ -54,7 +48,6 @@ class _BookmarksPageState extends State<BookmarksPage> {
     );
 
     if (kind == 'novel') {
-      // 小说：先取章节列表，再按 chapterId 定位到对应章
       try {
         final detail =
             await JmService.instance.fetchNovelDetail(comicId);
@@ -90,7 +83,6 @@ class _BookmarksPageState extends State<BookmarksPage> {
       return;
     }
 
-    // 漫画：取详情拿到章节列表，再定位该章该页
     final source = SourceRegistry.current;
     try {
       final info = await source.detail(comic);
@@ -109,7 +101,6 @@ class _BookmarksPageState extends State<BookmarksPage> {
             comic: comic,
             chapters: info.chapters,
             initialIndex: idx,
-            // 书签页码 >0 时直接跳过去，否则沿用阅读进度
             initialPage: page > 0
                 ? page
                 : (AppState.instance.lastReadFor(comicId)?.page ?? 1),
@@ -125,7 +116,6 @@ class _BookmarksPageState extends State<BookmarksPage> {
     }
   }
 
-  /// 编辑批注。
   Future<void> _editNote(Map<String, dynamic> bm) async {
     final ctrl = TextEditingController(text: '${bm['note'] ?? ''}');
     final ok = await showDialog<bool>(

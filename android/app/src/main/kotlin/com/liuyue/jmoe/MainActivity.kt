@@ -20,11 +20,8 @@ class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
     private var utterCounter = 0
 
-    // ---- 音量键翻页 ----
-    // 阅读页启用后，音量键不再调系统音量，而是交给 Dart 翻页。
     private var volumeKeyEnabled = false
 
-    // ---- 文件选择器 ----
     private var pendingPickResult: MethodChannel.Result? = null
     private var pendingSaveResult: MethodChannel.Result? = null
 
@@ -53,8 +50,6 @@ class MainActivity : FlutterActivity() {
             REQ_SAVE_FILE -> {
                 val uri = data?.data
                 if (resultCode == RESULT_OK && uri != null) {
-                    // 复制一份到用户选择的位置：由 Dart 侧写入私有文件后
-                    // 再调用 copyTo；这里只回传可写路径（若可解析）
                     val path = uriToPath(uri)
                     pendingSaveResult?.success(path)
                 } else {
@@ -65,7 +60,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 把 content:// URI 复制到缓存目录并返回真实路径。
     private fun uriToPath(uri: android.net.Uri): String? {
         return try {
             if (uri.scheme == "file") return uri.path
@@ -145,7 +139,6 @@ class MainActivity : FlutterActivity() {
                                 speak(text, rate, locale)
                                 result.success(true)
                             } else {
-                                // 设备无可用语音引擎
                                 result.error("TTS_UNAVAILABLE", "no tts engine", null)
                             }
                         }
@@ -163,12 +156,10 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "ttsSetPitch" -> {
-                    // 音调：0.5 ~ 2.0
                     tts?.setPitch((call.argument<Double>("pitch") ?: 1.0).toFloat())
                     result.success(true)
                 }
                 "ttsGetVoices" -> {
-                    // 必须先完成初始化，否则 tts 为 null，列表永远为空
                     initTts { ok ->
                         if (!ok) {
                             result.success(emptyList<Map<String, String>>())
@@ -188,7 +179,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "ttsSetVoice" -> {
-                    // 按名称选择音色
                     val name = call.argument<String>("name") ?: ""
                     try {
                         val v = tts?.voices?.firstOrNull { it.name == name }
@@ -263,10 +253,6 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "openPath" -> {
-                    // 打开目录：Android 7+ 不允许 file:// 直接外泄
-                    // （FileUriExposedException），而且多数 ROM 根本不支持
-                    // "resource/folder" MIME。这里用官方 DocumentsUI 的
-                    // 初始 URI 定位到目标目录，兼容性最好。
                     val path = call.argument<String>("path") ?: ""
                     runOnUiThread {
                         val ok = openFolderCompat(path)
@@ -274,9 +260,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "shareFiles" -> {
-                    // 分享本地文件：必须用 FileProvider 生成 content:// URI。
-                    // 之前直接用 file:// —— Android 7+ 会抛
-                    // FileUriExposedException，分享面板根本弹不出来。
                     val paths = call.argument<List<String>>("paths") ?: emptyList()
                     runOnUiThread {
                         try {
@@ -299,8 +282,6 @@ class MainActivity : FlutterActivity() {
                                 result.success(false)
                                 return@runOnUiThread
                             }
-                            // 按扩展名判断 MIME：.jmoe 用 application/octet-stream，
-                            // 图片用 image/*
                             val first = paths.first().lowercase()
                             val mime = when {
                                 first.endsWith(".jmoe") -> "application/octet-stream"
@@ -331,12 +312,10 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "setVolumeKeyPage" -> {
-                    // 阅读页进入时启用、离开时关闭
                     volumeKeyEnabled = call.argument<Boolean>("on") ?: false
                     result.success(true)
                 }
                 "notify" -> {
-                    // 发系统通知（订阅更新提醒）
                     val title = call.argument<String>("title") ?: ""
                     val body = call.argument<String>("body") ?: ""
                     val id = call.argument<Int>("id") ?: 1
@@ -345,7 +324,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "pickFile" -> {
-                    // 系统文件选择器：ACTION_OPEN_DOCUMENT，返回真实路径。
                     val exts = call.argument<List<String>>("extensions") ?: emptyList()
                     val mime = call.argument<String>("mime")
                     pendingPickResult = result
@@ -390,34 +368,13 @@ class MainActivity : FlutterActivity() {
             }
         }
     }
-    /// 打开某个目录（Android 7+ 兼容）。
-    ///
-    /// 策略顺序：
-    ///  1. 用 DocumentsUI 的 `ACTION_OPEN_DOCUMENT` + 该目录的 document URI
-    ///     （系统文件管理器会直接定位进去，最稳）
-    ///  2. 退到显式启动常见文件管理器并传目录 URI
-    ///  3. 再退到分享该目录（至少让用户能拿到路径）
     private fun openFolderCompat(path: String): Boolean {
         if (path.isEmpty()) return false
         val file = java.io.File(path)
         if (!file.exists()) return false
 
-        // 目标目录的 document URI：把 /storage/emulated/0/A/B 转成
-        // content://com.android.externalstorage.documents/document/primary:A%2FB
-        //
-        // 关键：**必须用 EXTRA_INITIAL_URI**，它才是「打开后定位到这个目录」
-        // 的官方参数。之前用 ACTION_VIEW + setData 只会打开文件管理器
-        // 的默认首页，用户看到的就是「打开了但没跳过去」。
         val targetUri = buildDocUri(file)
 
-        // 方案 1：**直接跳转到该目录**（不是让用户选目录）。
-        //
-        // 之前这里用 ACTION_OPEN_DOCUMENT_TREE —— 那是「选择一个目录」
-        // 的选择器（返回 result 给调用方），所以用户看到的是
-        // 「选取目录」界面，而且不会真的跳到目标位置。
-        //
-        // 用户要的是「打开所在位置」。正确做法是用 ACTION_VIEW 打开
-        // DocumentsUI 的根 + EXTRA_INITIAL_URI 定位到目标目录。
         try {
             val i = Intent(Intent.ACTION_VIEW).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -434,7 +391,6 @@ class MainActivity : FlutterActivity() {
         } catch (_: Throwable) {
         }
 
-        // 方案 1b：DocumentsUI 显式组件 + 初始 URI（跳到目录而非选目录）
         try {
             val i = Intent(Intent.ACTION_VIEW).apply {
                 setPackage("com.android.documentsui")
@@ -452,7 +408,6 @@ class MainActivity : FlutterActivity() {
         } catch (_: Throwable) {
         }
 
-        // 方案 2：让用户「打开」某文件定位到目录（打开文件夹选择器）
         try {
             val i = Intent(Intent.ACTION_VIEW).apply {
                 if (targetUri != null) {
@@ -476,7 +431,6 @@ class MainActivity : FlutterActivity() {
         } catch (_: Throwable) {
         }
 
-        // 方案 3：显式文件管理器 + 路径参数（国产 ROM 常用）
         val pkgs = listOf(
             "com.mi.android.globalFileexplorer",
             "com.android.documentsui",
@@ -506,11 +460,9 @@ class MainActivity : FlutterActivity() {
         return false
     }
 
-    // 把绝对路径转成 externalstorage 的 document URI。
     private fun buildDocUri(file: java.io.File): android.net.Uri? {
         return try {
             val abs = file.absolutePath
-            // 只处理 /storage/emulated/0/... 与 /sdcard/...
             val rel = when {
                 abs.startsWith("/storage/emulated/0/") ->
                     abs.removePrefix("/storage/emulated/0/")
@@ -525,7 +477,6 @@ class MainActivity : FlutterActivity() {
             null
         }
     }
-    // 音量键拦截：启用时吞掉音量事件并发给 Dart 翻页。
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         if (volumeKeyEnabled) {
             val code = event.keyCode
@@ -540,15 +491,12 @@ class MainActivity : FlutterActivity() {
                         channel?.invokeMethod("onVolumeKey", dir)
                     }
                 }
-                // 返回 true 表示已消费，系统不再调音量
                 return true
             }
         }
         return super.dispatchKeyEvent(event)
     }
 
-    // 发一条系统通知。
-    // 用 NotificationManager 直接发，不引入第三方插件。
     private fun postNotify(id: Int, title: String, body: String): Boolean {
         return try {
             if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -562,7 +510,6 @@ class MainActivity : FlutterActivity() {
             }
             val mgr = getSystemService(NOTIFICATION_SERVICE)
                 as android.app.NotificationManager
-            // 渠道（Android 8+ 必须）
             if (android.os.Build.VERSION.SDK_INT >= 26) {
                 val ch = android.app.NotificationChannel(
                     "jmoe_updates",
@@ -601,8 +548,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-
-
     private fun initTts(onReady: (Boolean) -> Unit) {
         if (ttsReady) {
             onReady(true)
@@ -632,7 +577,6 @@ class MainActivity : FlutterActivity() {
                 }
                 onReady(true)
             } else {
-                // 初始化失败：明确告知 Dart 侧不可用
                 ttsReady = false
                 onReady(false)
             }

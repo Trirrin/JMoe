@@ -10,11 +10,6 @@ import 'login_page.dart';
 import 'my_comments_page.dart';
 import 'profile_edit_page.dart';
 
-/// 账号管理页：已登录显示账号信息 + 资产 + 签到 + 套餐（只读）；
-/// 未登录引导去登录。
-///
-/// 说明：本页**不实现任何支付流程**。套餐列表仅作展示，
-/// 点击后跳转官方网页，付款由官方站点完成。
 class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
 
@@ -39,7 +34,6 @@ class _AccountPageState extends State<AccountPage> {
 
   Map<String, dynamic>? _daily;
 
-  /// 解析后的签到状态（今天是否已签、连续天数、本月日历）
   DailyStatus? _dailyStatus;
   List<Map<String, dynamic>> _plans = const [];
   bool _checking = false;
@@ -50,10 +44,6 @@ class _AccountPageState extends State<AccountPage> {
     if (AppState.instance.loggedIn) _loadAssets();
   }
 
-  /// 从已登录会话（AppState.member）读取资产。
-  ///
-  /// 说明：官方 `coin` 接口即使携带 JWT 也返回「請先登入會員」，
-  /// 实测资产字段随 `login` 响应一起返回，因此这里以本地会话为准。
   Future<void> _loadAssets() async {
     setState(() => _assetsLoading = true);
     final m = AppState.instance.member ?? const <String, dynamic>{};
@@ -71,14 +61,12 @@ class _AccountPageState extends State<AccountPage> {
     _favoritesMax = asNum(m['album_favorites_max']);
     _charge = '${m['charge'] ?? ''}'.isEmpty ? null : '${m['charge']}';
 
-    // 会员：ad_free 为 true 即已去广告；ad_free_before 是到期时间
     _vip = (m['ad_free'] == true || '${m['ad_free']}' == '1');
     final before = '${m['ad_free_before'] ?? ''}';
     _vipExpire = (before.isEmpty || before.startsWith('0000'))
         ? null
         : before;
 
-    // 签到信息 + 套餐（只读）
     final uid = '${m['uid'] ?? ''}';
     final results = await Future.wait([
       JmService.instance.fetchPlans(),
@@ -86,8 +74,6 @@ class _AccountPageState extends State<AccountPage> {
     ]);
     if (!mounted) return;
     setState(() {
-      // 顺序很重要：必须先写 _daily，再解析（早期写反了，
-      // 导致 _dailyStatus 永远基于上一轮的 null 计算）
       _daily = results.length > 1 ? results[1] as Map<String, dynamic>? : null;
       _dailyStatus = JmService.parseDaily(_daily);
       _plans = results[0] as List<Map<String, dynamic>>;
@@ -98,7 +84,6 @@ class _AccountPageState extends State<AccountPage> {
   Future<void> _checkIn() async {
     final d = _daily;
     if (d == null || _checking) return;
-    // 已签到：不再发请求，直接提示
     if (_dailyStatus?.todaySigned == true) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -144,18 +129,11 @@ class _AccountPageState extends State<AccountPage> {
   String? get _avatar {
     final p = AppState.instance.avatarPath;
     if (p == null || p.isEmpty) return null;
-    // 默认占位图（nopic-Male.gif / nopic-Female.gif）不当作头像，
-    // 直接回落到人形图标，避免显示成一张灰色小图。
     if (p.startsWith('nopic')) return null;
     if (p.startsWith('http')) return p;
-    // 服务端 photo 是纯文件名（如 xxxxx.jpg），需拼 /media/user/。
-    //
-    // **必须用主站域名，不能用图片 CDN**：实测 cdn-msp*.jmapiproxy*.cc
-    // 等图片 CDN 对 /media/user/ 返回 0 字节，头像永远加载不出来。
     return '${JmApi.instance.baseUrl}media/user/$p';
   }
 
-  /// 跳转官方网页（不做站内支付）。
   Future<void> _openOfficial() async {
     final uri = Uri.parse('https://18comic.vip');
     try {
@@ -220,7 +198,6 @@ class _AccountPageState extends State<AccountPage> {
       appBar: AppBar(title: Text(L.t('accountManage'))),
       body: RefreshIndicator(
         onRefresh: _loadAssets,
-        // 扣除状态栏高度：刷新图标从状态栏下方出现
         edgeOffset: MediaQuery.of(context).padding.top,
         child: ListView(
             physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
@@ -260,7 +237,6 @@ class _AccountPageState extends State<AccountPage> {
             ],
             const SizedBox(height: 18),
 
-            // ---- 资产卡片 ----
             if (_assetsLoading)
               const Center(
                 child: Padding(
@@ -345,7 +321,6 @@ class _AccountPageState extends State<AccountPage> {
               ),
             ],
 
-            // ---- 签到 ----
             if (_daily != null) ...[
               const SizedBox(height: 18),
               _sectionTitle(theme, L.t('dailyCheckIn')),
@@ -379,7 +354,6 @@ class _AccountPageState extends State<AccountPage> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    // 连续天数提示
                     if ((_dailyStatus?.streakDays ?? 0) > 0 ||
                         (_dailyStatus?.signedCount ?? 0) > 0) ...[
                       Text(
@@ -397,7 +371,6 @@ class _AccountPageState extends State<AccountPage> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        // 已签到 → 禁用
                         onPressed: _checking ||
                                 (_dailyStatus?.todaySigned == true)
                             ? null
@@ -422,7 +395,6 @@ class _AccountPageState extends State<AccountPage> {
                         ),
                       ),
                     ),
-                    // 本月签到日历
                     if ((_dailyStatus?.days.isNotEmpty ?? false)) ...[
                       const SizedBox(height: 14),
                       Text(
@@ -441,7 +413,6 @@ class _AccountPageState extends State<AccountPage> {
               ),
             ],
 
-            // ---- 套餐（只读） ----
             if (_plans.isNotEmpty) ...[
               const SizedBox(height: 20),
               _sectionTitle(theme, L.t('membershipPlans')),
@@ -473,8 +444,6 @@ class _AccountPageState extends State<AccountPage> {
               color: scheme.surfaceContainerLow,
               child: Column(
                 children: [
-                  // 「云端收藏 / 历史」入口已移除：书架页已有同功能，
-                  // 账号页重复摆一处只是噪音。改为「我的评论」。
                   ListTile(
                     leading: const Icon(Icons.forum_outlined),
                     title: Text(L.t('myComments')),
@@ -498,8 +467,6 @@ class _AccountPageState extends State<AccountPage> {
                       if (changed == true && mounted) setState(() {});
                     },
                   ),
-                  // 修改密码与「编辑资料」同级：都是账号级操作，
-                  // 不该埋在资料表单最底部
                   ListTile(
                     leading: const Icon(Icons.lock_outline_rounded),
                     title: Text(L.t('changePassword')),
@@ -530,29 +497,18 @@ class _AccountPageState extends State<AccountPage> {
     );
   }
 
-  /// 本月签到日历：按星期对齐的 7 列日历格（**周日在前**）。
-  ///
-  /// 原来的实现是「一串 30 个方块直接 Wrap」，既看不出星期，也容易
-  /// 因为解析漏项而只剩几格。这里改成标准日历：空白占位对齐 1 号所在星期，
-  /// 每格显示日号，已签到高亮、今日描边。
-  ///
-  /// 列顺序按「日 一 二 三 四 五 六」：服务端 `bonus` 标记落在每周的
-  /// 周日 + 周一，周日排在首列时奖励节点正好首尾相邻，更符合直觉。
   Widget _buildCalendar(ThemeData theme) {
     final scheme = theme.colorScheme;
     final days = _dailyStatus?.days ?? const <DailyDay>[];
     if (days.isEmpty) return const SizedBox.shrink();
 
     final now = DateTime.now();
-    // DateTime.weekday：1=周一 … 7=周日。
-    // 换成「周日在前」的列序号：周日 → 0，周一 → 1 … 周六 → 6
     int colOf(DateTime d) => d.weekday % 7;
     final firstCol = colOf(DateTime(now.year, now.month, 1));
     final todayDay = now.day;
 
     const cols = 7;
     final cells = <Widget>[
-      // 星期表头（周日起）
       for (final w in const ['日', '一', '二', '三', '四', '五', '六'])
         SizedBox(
           height: 20,
@@ -567,12 +523,9 @@ class _AccountPageState extends State<AccountPage> {
             ),
           ),
         ),
-      // 1 号之前的空位
       for (var i = 0; i < firstCol; i++) const SizedBox(height: 34),
-      // 每一天
       for (final d in days)
         _calendarCell(theme, d, int.tryParse(d.date) ?? 0, todayDay),
-      // 补足最后一行，保证网格对齐
       for (var i = 0; i < (cols - (firstCol + days.length) % cols) % cols; i++)
         const SizedBox(height: 34),
     ];
@@ -591,13 +544,6 @@ class _AccountPageState extends State<AccountPage> {
   Widget _calendarCell(ThemeData theme, DailyDay d, int day, int today) {
     final scheme = theme.colorScheme;
     final isToday = day == today;
-    // 注意：服务端的 `bonus` 标记落在每月 01/07/08/14/15/21/22/28/29
-    // （每周的周日 + 周一），本质是「3 天 / 7 天奖励节点」的周期刻度。
-    // 早期版本在这里画了个小圆点，结果整列周日全是点，看着像 bug ——
-    // 而且没有图例，用户无法理解。奖励规则标题里已经写明，这里不再画点。
-    //
-    // 形状用**正圆**（不是圆角方块）：日历日期用圆形是通行做法，
-    // 圆角矩形在小尺寸下会显得像按钮而不是日期。
     return Container(
       alignment: Alignment.center,
       decoration: BoxDecoration(
@@ -670,14 +616,6 @@ class _AccountPageState extends State<AccountPage> {
   Widget _planTile(ThemeData theme, Map<String, dynamic> p) {
     final scheme = theme.colorScheme;
     final name = '${p['name'] ?? ''}';
-    // 官方字段语义（payment 接口实测）：
-    //   months      套餐时长（1/3/6/12 个月）
-    //   price       每月单价（如 6 个月 = 22.33）
-    //   total       该套餐总价（如 6 个月 = 134）—— 这才是用户要付的钱
-    //   original    原价（无折扣时等于 total）
-    //   days / exp  有效天数 / 赠品经验
-    // 早期把 price 当总价显示成「¥22.33」，看起来像每月价格，
-    // 与「3/6/12 个月」的量级完全对不上。这里以 total 为准。
     final months = int.tryParse('${p['months'] ?? ''}') ?? 0;
     final perMonth = '${p['price'] ?? ''}';
     final total = '${p['total'] ?? p['original'] ?? ''}';
@@ -686,8 +624,6 @@ class _AccountPageState extends State<AccountPage> {
     final features =
         (p['features'] as List?)?.whereType<Object>().map((e) => '$e').toList() ??
             const <String>[];
-    // 不显示「最热」角标、也不做选中态高亮 —— 纯只读列表，
-    // 高亮反而让人以为「这个已被选中/已购买」。
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
@@ -713,7 +649,6 @@ class _AccountPageState extends State<AccountPage> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      // 换算成「每月多少钱」，方便横向比较不同时长
                       if (months > 1 && perMonth.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),

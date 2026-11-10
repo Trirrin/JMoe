@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jmoe/core/l10n.dart';
 
 void main() {
-  // 文案来自 assets/i18n/*.json，需要绑定与资源加载
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {
@@ -29,7 +28,7 @@ void main() {
         m[k] = L.t(k);
         expect(L.t(k), isNot(k), reason: '$lang 缺失 key: $k');
       }
-      seen[lang] = Map.of(m); // 深拷贝，避免引用变化
+      seen[lang] = Map.of(m);
     }
     expect(seen['zh-Hans']!['tabDiscover'], '发现');
     expect(seen['zh-Hant']!['tabDiscover'], '發現');

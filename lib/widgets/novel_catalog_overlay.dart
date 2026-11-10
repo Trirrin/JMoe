@@ -3,9 +3,6 @@ import 'package:flutter/material.dart';
 import '../core/l10n.dart';
 import '../core/reader_settings.dart';
 
-/// 小说目录覆盖层（章节列表 + 内文搜索）。
-///
-/// 从 `novel_pages.dart` 抽出，只负责列表渲染与交互回调。
 class NovelCatalogOverlay extends StatelessWidget {
   const NovelCatalogOverlay({
     super.key,

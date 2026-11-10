@@ -10,17 +10,10 @@ import '../core/l10n.dart';
 import '../widgets/common_widgets.dart';
 import 'jmoe_archive_reader_page.dart';
 
-/// 系统文件选择器通道（原生侧实现）。
-///
-/// Flutter 生态的 file_picker 会引入较多原生依赖；本项目只需「选单个文件
-/// 并拿到路径」，用 MethodChannel 直接调 `ACTION_OPEN_DOCUMENT` 更轻。
 class FilePickerChannel {
   FilePickerChannel._();
   static const _ch = MethodChannel('jmoe/reader');
 
-  /// 选一个文件，返回绝对路径（取消返回 null）。
-  ///
-  /// [extensions] 用于过滤（如 `['jmoe']`、`['json']`）。
   static Future<String?> pickFile({
     List<String> extensions = const [],
     String? mimeType,
@@ -35,7 +28,6 @@ class FilePickerChannel {
     }
   }
 
-  /// 让用户选择「保存到」位置，返回目标路径（取消返回 null）。
   static Future<String?> pickSavePath({
     required String suggestedName,
   }) async {
@@ -49,20 +41,9 @@ class FilePickerChannel {
   }
 }
 
-/// 「我导入」：**通过文件选择器**导入 `.jmoe` 加密包并阅读。
-///
-/// 之前是从固定目录扫描（要求用户自己去文件管理器把文件放进去），
-/// 这既反直觉又容易放错位置。现在改为：
-///  * 点「导入文件」→ 系统文件管理器选 `.jmoe`
-///  * 选中后复制到应用私有导入目录（保证长期可读）
-///  * 列表里点条目直接阅读
 class ImportedPage extends StatefulWidget {
   const ImportedPage({super.key, this.embedded = false});
 
-  /// 是否作为 Tab 内容嵌入 [DownloadsHubPage]。
-  ///
-  /// true 时不渲染自己的 Scaffold/AppBar，
-  /// 「打开文件夹 / 导入」按钮移到页面顶部工具条。
   final bool embedded;
 
   @override
@@ -94,7 +75,6 @@ class _ImportedPageState extends State<ImportedPage> {
       for (final f in dir.listSync().whereType<File>()) {
         if (!JmoeArchive.isArchiveName(f.path)) continue;
         final count = await JmoeArchive.pageCount(f.path);
-        // 读包内作品元数据：导入后能展示标题/作者，而不是「一堆无名图片」
         final meta = await JmoeArchive.readAlbumMeta(f.path) ?? const {};
         final fallbackName = f.uri.pathSegments.last
             .replaceAll('.jmoe', '')
@@ -121,7 +101,6 @@ class _ImportedPageState extends State<ImportedPage> {
     });
   }
 
-  /// 通过文件选择器导入一个 `.jmoe`。
   Future<void> _importFromPicker() async {
     if (_importing) return;
     setState(() => _importing = true);
@@ -131,14 +110,13 @@ class _ImportedPageState extends State<ImportedPage> {
     }
     if (path == null) {
       setState(() => _importing = false);
-      return; // 用户取消
+      return;
     }
     try {
       final src = File(path);
       if (!await src.exists()) {
         throw const FileSystemException('source missing');
       }
-      // 校验确实是 .jmoe（避免选错文件后读到垃圾数据）
       final count = await JmoeArchive.pageCount(path);
       if (count <= 0) {
         if (mounted) {
@@ -270,7 +248,6 @@ class _ImportedPageState extends State<ImportedPage> {
                   ),
       );
 
-    // 顶部工具条：打开文件夹 / 导入文件
     final toolbar = Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
@@ -301,7 +278,6 @@ class _ImportedPageState extends State<ImportedPage> {
       ],
     );
 
-    // 嵌入模式：不套 Scaffold，工具条放页面顶部
     if (widget.embedded) {
       return Column(
         children: [
@@ -329,12 +305,10 @@ class _ImportedPageState extends State<ImportedPage> {
   }
 }
 
-/// 一个已导入的加密包。
 class _ImportedItem {
   final File file;
   final String title;
 
-  /// 作品名（与章节名分开显示，没有则为空）
   final String albumTitle;
   final int pageCount;
   final Map<String, dynamic> meta;

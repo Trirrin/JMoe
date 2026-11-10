@@ -4,13 +4,6 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
 
-/// 多语言：文案全部来自 `assets/i18n/{zh,zhHant,en}.json`，代码里不再硬编码。
-///
-/// 用法：
-///   `L.t('catalog')`
-///   `L.tp('worksCount', {'n': 12})`  → 把 `{n}` 替换为 12
-///
-/// 启动时调用 [load] 预加载所有语言表；未加载完成时自动回退到 key（不会崩）。
 class L {
   L._();
 
@@ -20,7 +13,6 @@ class L {
     Locale('en'),
   ];
 
-  /// 语言代码 → 资源文件
   static const Map<String, String> _files = {
     'zh': 'assets/i18n/zh.json',
     'zhHant': 'assets/i18n/zhHant.json',
@@ -37,7 +29,6 @@ class L {
   static bool get isEn => _lang == 'en';
   static bool get loaded => _loaded;
 
-  /// 预加载全部语言表（幂等）。
   static Future<void> load() async {
     if (_loaded) return;
     for (final entry in _files.entries) {
@@ -50,13 +41,11 @@ class L {
           );
         }
       } catch (_) {
-        // 单个语言加载失败不影响其它语言
       }
     }
     _loaded = true;
   }
 
-  /// 切换界面语言（zh-Hans / zh-Hant / en）。
   static void setLang(String lang) {
     final next = _normalize(lang);
     if (_lang == next) return;
@@ -64,7 +53,6 @@ class L {
     _notifier.value++;
   }
 
-  /// 供 UI 监听语言变化。
   static final ValueNotifier<int> _notifier = ValueNotifier<int>(0);
   static ValueListenable<int> get listenable => _notifier;
 
@@ -84,7 +72,6 @@ class L {
     }
   }
 
-  /// 取文案；缺失时回退到简中，再回退到 key 本身。
   static String t(String key) {
     final cur = _tables[_lang];
     final v = cur?[key];
@@ -96,7 +83,6 @@ class L {
     return key;
   }
 
-  /// 带占位符的文案：`{n}` / `{name}` …
   static String tp(String key, Map<String, Object?> args) {
     var s = t(key);
     args.forEach((k, v) {
@@ -105,9 +91,7 @@ class L {
     return s;
   }
 
-  /// 是否包含某 key（调试/测试用）。
   static bool has(String key) => _tables[_lang]?.containsKey(key) ?? false;
 
-  /// 全部语言表（测试用，外部只读）。
   static Map<String, Map<String, String>> get tables => _tables;
 }

@@ -4,7 +4,6 @@ import '../core/ehentai_service.dart';
 import 'common_widgets.dart';
 import '../core/l10n.dart';
 
-/// e-hentai 列表条目（搜索结果 / 发现页共用）。
 class EHListTile extends StatelessWidget {
   final EHItem item;
   final VoidCallback onTap;

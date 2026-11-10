@@ -3,10 +3,6 @@ import 'package:flutter/material.dart';
 import '../core/l10n.dart';
 import '../core/reader_settings.dart';
 
-/// 阅读主题选择面板。
-///
-/// 与 `NovelTypographySheet` 保持同一套视觉与交互，
-/// 解决原先「主题面板用 ListTile、排版面板用滑块」的割裂。
 class NovelThemeSheet extends StatelessWidget {
   const NovelThemeSheet({
     super.key,
@@ -17,10 +13,8 @@ class NovelThemeSheet extends StatelessWidget {
 
   final ReaderSettings settings;
 
-  /// 当前生效主题（用于取色）
   final ReaderTheme theme;
 
-  /// 选择变化后回调（页面据此 setState 重绘）
   final VoidCallback onChanged;
 
   @override
@@ -40,7 +34,6 @@ class NovelThemeSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            // 跟随 App 设置
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
@@ -59,9 +52,7 @@ class NovelThemeSheet extends StatelessWidget {
               ),
             ),
             const Divider(height: 24),
-            // 手动选择
             Opacity(
-              // 跟随 App 时，手动选择置灰
               opacity: settings.followSystemTheme ? 0.4 : 1,
               child: IgnorePointer(
                 ignoring: settings.followSystemTheme,

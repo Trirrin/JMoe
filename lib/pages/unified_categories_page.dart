@@ -11,17 +11,13 @@ import 'unified_detail_page.dart';
 import 'unified_home_page.dart';
 import '../core/l10n.dart';
 
-/// 统一分类页（JM 左侧分类树 / EH 顶部分类条，同一套布局自适应）。
 class UnifiedCategoriesPage extends StatefulWidget {
-  /// 供外部触发热加载的全局 key。
   static final GlobalKey<State<UnifiedCategoriesPage>> catalogKey =
       GlobalKey<State<UnifiedCategoriesPage>>();
 
-  /// 启动预热：提前拉取分类与首屏列表。
   static void precacheNow() {
     final st = catalogKey.currentState;
     if (st == null) return;
-    // ignore: avoid_dynamic_calls
     (st as dynamic).precache();
   }
 
@@ -39,7 +35,6 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
   List<BrowseCategory> _cats = [];
   bool _loading = true;
 
-  /// 滚动偏移（驱动回到顶部）
   double _scrollOffset = 0;
   String? _error;
 
@@ -60,9 +55,6 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
     ('tr', L.t('sortNewest')),
   ];
 
-
-  /// 预取：启动后即可调用，提前把分类与首屏列表塞进静态缓存，
-  /// 这样用户切到分类页时直接命中缓存，不会看到加载中的空白。
   Future<void> precache() async {
     if (_catCache[_source.id]?.isNotEmpty == true &&
         (_listCache[_source.id]?.isNotEmpty == true)) {
@@ -197,7 +189,6 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
   Widget build(BuildContext context) {
     super.build(context);
     final theme = Theme.of(context);
-    // 离线模式：分类页完全是在线内容，直接给明确空态
     if (AppState.instance.offlineMode) {
       return Scaffold(
         body: EmptyView(
@@ -244,7 +235,6 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
                 ),
               ],
             ),
-            // 右下角：回到顶部
             Positioned(
               right: 16,
               bottom: 16,
@@ -259,7 +249,6 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
     );
   }
 
-  /// 回到列表顶部。网格使用主滚动控制器，直接取最近的 ScrollPosition。
   void _scrollToListTop() {
     final pos = PrimaryScrollController.maybeOf(context);
     if (pos != null && pos.hasClients) {
@@ -270,7 +259,6 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
       );
       return;
     }
-    // 兜底：遍历所有可滚动节点中最靠右的那个
     final states = Scrollable.maybeOf(context);
     states?.position.animateTo(
       0,

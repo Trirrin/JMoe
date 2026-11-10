@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
-/// 单条书签。
 class ReaderBookmark {
   final String bookId;
   final String chapterKey;
   final String chapterTitle;
-  final int offset; // 章节内字符偏移
+  final int offset;
   final String excerpt;
   final int createdAt;
 
@@ -38,7 +37,6 @@ class ReaderBookmark {
       );
 }
 
-/// 单条划线 / 批注。
 class ReaderAnnotation {
   final String id;
   final String bookId;
@@ -91,7 +89,6 @@ class ReaderAnnotation {
       );
 }
 
-/// 阅读进度：章节索引 + 章节内比例。
 class ReaderProgress {
   final int chapterIndex;
   final double ratio;
@@ -120,15 +117,10 @@ class ReaderProgress {
       );
 }
 
-/// 阅读数据服务（书签 / 划线 / 进度），进程内缓存，落盘由调用方提供 KV 适配。
-///
-/// 用注入式存储接口，避免与 SharedPreferences / 数据库强耦合，
-/// 也便于后续替换为 sqflite 而不改业务代码。
 class ReaderStore {
   ReaderStore._();
   static final ReaderStore instance = ReaderStore._();
 
-  /// 简易 KV 后端：读写字符串。默认交给外部 setBackend 注入。
   Future<String?> Function(String key)? _read;
   Future<void> Function(String key, String value)? _write;
 
@@ -184,8 +176,6 @@ class ReaderStore {
     }
   }
 
-  // ---- 进度 ----
-
   ReaderProgress? progress(String bookId) => _progress[bookId];
 
   Future<void> saveProgress(
@@ -204,8 +194,6 @@ class ReaderStore {
     _progress[bookId] = p;
     await _write!(_pk(bookId), jsonEncode(p.toJson()));
   }
-
-  // ---- 书签 ----
 
   List<ReaderBookmark> bookmarks(String bookId) =>
       List.unmodifiable(_bookmarks[bookId] ?? const []);
@@ -237,8 +225,6 @@ class ReaderStore {
       jsonEncode(list.map((e) => e.toJson()).toList()),
     );
   }
-
-  // ---- 划线 / 批注 ----
 
   List<ReaderAnnotation> annotations(String bookId, {String? chapterKey}) {
     final list = _annotations[bookId] ?? const <ReaderAnnotation>[];

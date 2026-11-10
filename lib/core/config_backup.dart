@@ -6,17 +6,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'reader_settings.dart';
 
-/// 配置备份与恢复：
-/// 把「设置 / 阅读偏好 / 收藏 / 历史 / 书签 / 批注」打包成 JSON，
-/// 可导出到文件、也可从文件导入（不含登录凭据）。
 class ConfigBackup {
   ConfigBackup._();
   static final ConfigBackup instance = ConfigBackup._();
 
-  /// 版本号，便于将来兼容旧备份。
   static const int formatVersion = 1;
 
-  /// 允许导出的 key（白名单，避免把 jwt 等凭据带出去）。
   static const List<String> _exportKeys = [
     'themeMode',
     'oled',
@@ -36,7 +31,6 @@ class ConfigBackup {
     'cache_retention_days',
   ];
 
-  /// 打包为 JSON 字符串。
   Future<String> export() async {
     final sp = await SharedPreferences.getInstance();
     final data = <String, dynamic>{};
@@ -44,7 +38,6 @@ class ConfigBackup {
       final v = sp.get(k);
       if (v != null) data[k] = v;
     }
-    // 书签 / 批注使用前缀存储，需按前缀扫描
     for (final k in sp.getKeys()) {
       if (k.startsWith('reader_bookmarks_') ||
           k.startsWith('reader_annotations_') ||
@@ -61,7 +54,6 @@ class ConfigBackup {
     });
   }
 
-  /// 导出到应用文档目录，返回文件路径。
   Future<String?> exportToFile() async {
     try {
       final json = await export();
@@ -77,10 +69,6 @@ class ConfigBackup {
     }
   }
 
-  /// 从 JSON 字符串导入。
-  ///
-  /// [merge] 为 true 时只覆盖备份中存在的键，否则等同 merge（
-  /// 键级覆盖，不删除其它本地数据，更安全）。
   Future<({bool ok, int count, String? error})> import(
     String json, {
     bool merge = true,
@@ -112,7 +100,6 @@ class ConfigBackup {
         }
         n++;
       }
-      // 阅读偏好需要重新载入内存
       await ReaderSettings.instance.load();
       return (ok: true, count: n, error: null);
     } catch (e) {

@@ -2,21 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-/// 跑马灯文字：内容放不下时缓慢来回平移；放得下则静态显示。
-///
-/// 实现要点（旧版用 ScrollController 判断溢出，首帧常拿不到 hasClients 而不生效）：
-///  * 用 LayoutBuilder 拿到可用宽度
-///  * 用 TextPainter 精确测量文本宽度判断是否溢出
-///  * 用 AnimationController + Transform.translate 平移，起停缓入缓出（非线性）
 class MarqueeText extends StatefulWidget {
   final String text;
   final TextStyle? style;
   final int maxLines;
 
-  /// 每秒平移像素
   final double velocity;
 
-  /// 两端停留时间
   final Duration pause;
 
   const MarqueeText(
@@ -110,7 +102,6 @@ class _MarqueeTextState extends State<MarqueeText>
         final full = _measure(widget.text);
         final overflow = (full - avail).clamp(0.0, double.infinity);
 
-        // 溢出量变化时重新安排动画
         if ((overflow - _overflowPx).abs() > 0.5) {
           _overflowPx = overflow;
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -123,7 +114,6 @@ class _MarqueeTextState extends State<MarqueeText>
         }
 
         final offset = _overflowPx > 0.5
-            // 非线性：缓入缓出，起停自然
             ? -Curves.easeInOut.transform(_ctrl.value) * _overflowPx
             : 0.0;
 

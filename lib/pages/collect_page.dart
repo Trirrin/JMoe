@@ -8,11 +8,6 @@ import '../widgets/common_widgets.dart';
 import 'unified_detail_page.dart';
 import 'unified_home_page.dart';
 
-/// 关注 + 专辑页。
-///
-/// 两个标签页：
-///  * **关注**：关注的作者 / 标签，点进去看该关键词下的所有作品
-///  * **专辑**：可手工编辑关键词的作品合集（解决同作者多笔名/工作室）
 class CollectPage extends StatefulWidget {
   const CollectPage({super.key, this.initialTab = 0});
 
@@ -41,8 +36,6 @@ class _CollectPageState extends State<CollectPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 只保留「关注」：专辑功能已删除（用户要求）。
-    // 关注作者时会自动订阅该作者的全部更新，不再需要手工建合集。
     return Scaffold(
       appBar: AppBar(
         title: Text(L.t('following')),
@@ -52,7 +45,6 @@ class _CollectPageState extends State<CollectPage> {
   }
 }
 
-/// 关注列表：作者 / 标签，点击查看该关键词下的作品。
 class _FollowingTab extends StatelessWidget {
   const _FollowingTab();
 
@@ -149,7 +141,6 @@ class _FollowingTab extends StatelessWidget {
   }
 }
 
-/// 按关键词（作者/标签）搜作品的结果页。
 class _KeywordResultsPage extends StatefulWidget {
   const _KeywordResultsPage({
     required this.kind,

@@ -4,10 +4,6 @@ import '../core/app_state.dart';
 import '../core/jm_service.dart';
 import '../core/l10n.dart';
 
-/// 修改密码（独立页面，与「编辑资料」同级入口）。
-///
-/// 之前这块埋在「编辑资料」表单底部，和昵称/生日混在一起，
-/// 既容易误填，也让人以为「保存资料」会顺带改密码。
 class ChangePasswordPage extends StatefulWidget {
   const ChangePasswordPage({super.key});
 

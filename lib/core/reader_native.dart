@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-/// 原生能力桥：TTS 朗读、亮度、常亮。
 class ReaderNative {
   ReaderNative._();
   static final ReaderNative instance = ReaderNative._();
@@ -11,7 +10,6 @@ class ReaderNative {
 
   bool _bound = false;
 
-  /// TTS 单条播完回调。
   VoidCallback? onUtteranceDone;
 
   void _bind() {
@@ -70,14 +68,12 @@ class ReaderNative {
     } catch (_) {}
   }
 
-  /// 设置音调（0.5 ~ 2.0）。
   Future<void> ttsSetPitch(double pitch) async {
     try {
       await _ch.invokeMethod('ttsSetPitch', {'pitch': pitch});
     } catch (_) {}
   }
 
-  /// 获取设备可用音色列表：[{name, locale}]
   Future<List<Map<String, String>>> ttsGetVoices() async {
     try {
       final r = await _ch.invokeMethod<List>('ttsGetVoices');
@@ -94,7 +90,6 @@ class ReaderNative {
     }
   }
 
-  /// 按名称选择音色。
   Future<bool> ttsSetVoice(String name) async {
     try {
       final r = await _ch.invokeMethod<bool>('ttsSetVoice', {'name': name});
@@ -113,14 +108,12 @@ class ReaderNative {
     }
   }
 
-  /// value: -1 表示跟随系统，0..1 为绝对亮度。
   Future<void> setBrightness(double value) async {
     try {
       await _ch.invokeMethod('setBrightness', {'value': value});
     } catch (_) {}
   }
 
-  /// 读取当前亮度（0..1）。
   Future<double> getBrightness() async {
     try {
       final v = await _ch.invokeMethod<double>('getBrightness');
@@ -130,7 +123,6 @@ class ReaderNative {
     }
   }
 
-  /// 读取媒体音量（0..1）。
   Future<double> getVolume() async {
     try {
       final v = await _ch.invokeMethod<double>('getVolume');
@@ -140,7 +132,6 @@ class ReaderNative {
     }
   }
 
-  /// 设置媒体音量（0..1）。
   Future<void> setVolume(double value) async {
     try {
       await _ch.invokeMethod('setVolume', {'value': value.clamp(0.0, 1.0)});

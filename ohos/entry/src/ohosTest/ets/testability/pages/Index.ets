@@ -1,5 +1,4 @@
 
-
 import hilog from '@ohos.hilog';
 
 @Entry

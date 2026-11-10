@@ -3,7 +3,6 @@ import 'models.dart';
 import 'source.dart';
 import 'l10n.dart';
 
-/// JM 数据源适配器：把 JmService 的接口映射到统一的 ComicSource。
 class JmSource implements ComicSource {
   JmSource._();
   static final JmSource instance = JmSource._();
@@ -19,7 +18,6 @@ class JmSource implements ComicSource {
   @override
   String? coverOf(Comic c) => _service.coverUrl(c);
 
-  /// 清理服务端标题里的运营话术（如「連載更新→右滑看更多→」）。
   static String cleanTitle(String raw) {
     var s = raw;
     s = s.replaceAll(RegExp(r'→[^→]*→?'), '');
@@ -31,8 +29,6 @@ class JmSource implements ComicSource {
 
   @override
   Future<HomeFeed> home({int page = 1}) async {
-    // 只请求轻量接口，保证首屏快速出现内容；
-    // 推荐分区（promote 响应体可达数 MB）由 homeDeferred 单独异步补齐。
     final results = await Future.wait([
       _service.fetchRandomRecommend().catchError((_) => <Comic>[]),
       _service.fetchLatest(page: page).catchError((_) => <Comic>[]),
@@ -54,7 +50,6 @@ class JmSource implements ComicSource {
     );
   }
 
-  /// 异步补齐推荐分区（首页会先显示上面 home() 的结果）。
   Future<List<HomeSection>> homeDeferred() async {
     List<PromoteSection> promote;
     try {
@@ -123,8 +118,6 @@ class JmSource implements ComicSource {
         .map(
           (g) => BrowseCategory(
             id: g.id,
-            // 服务端仅对 id 型分类下发 total_albums；slug 型（最新A漫/Cosplay/3D/
-            // 禁漫漢化組）为 0，此时不显示数字，避免误以为没有内容。
             label: _catLabel(g),
             slug: g.slug.isEmpty ? g.id : g.slug,
             subs: g.subs
@@ -137,7 +130,6 @@ class JmSource implements ComicSource {
         .toList();
   }
 
-  /// 分类显示名：有真实数量时附在第二行。
   static String _catLabel(CategoryGroup g) {
     final n = int.tryParse(g.total) ?? 0;
     return n > 0 ? '${g.name}\n$n' : g.name;
@@ -170,8 +162,6 @@ class JmSource implements ComicSource {
     if (d == null) {
       return DetailInfo(comic: comic);
     }
-    // 单本作品 series 为空（series_id=0）：把自身当作唯一章节，
-    // 否则详情页不会出现「开始阅读」。
     final chapters = d.series.isNotEmpty
         ? d.series
         : <Chapter>[
@@ -213,7 +203,6 @@ class JmSource implements ComicSource {
       chapterId: r.id,
       chapterName: r.name.isNotEmpty ? r.name : chapter.name,
       scrambleId: r.scrambleId,
-      // 官方 scramble_image 的 aid 参数即 readList.id（章节 ID）
       scrambleAid: r.id,
       pages: r.images.map((p) => PageRef(p.page, directUrl: p.url)).toList(),
     );

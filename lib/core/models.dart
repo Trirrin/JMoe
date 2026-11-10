@@ -1,23 +1,8 @@
-/// 数据模型：统一 JM 与 e-hentai 两种源。
 library;
 
-/// 清洗作者名：服务端会返回带方括号的多种写法，统一去掉。
-///
-/// 实测见过的形态：
-///  * `[作者]`                 —— 单层包裹
-///  * `[[作者]]`               —— 双层包裹
-///  * `[作者] [汉化组]`         —— 只包了其中一段
-///  * `[作者]（中文）`          —— 括号只包前半段
-///
-/// 早期只剥最外层一次，于是 `[[作者]]` 剥完还剩 `[作者]`，
-/// 用户就会看到「有些作者名称会额外被 [] 包裹」。
-/// 这里改成：循环剥掉**所有完全包裹整串**的方括号。
 String cleanAuthor(String raw) {
   var s = raw.trim();
-  // 反复剥：处理 [[x]] 这种多层
   while (s.length >= 2 && s.startsWith('[') && s.endsWith(']')) {
-    // 只有当这一对方括号正好包住整串时才剥
-    // （`[a] [b]` 这种首尾虽然也是 [ ]，但中间有内容，不该整体剥）
     final inner = s.substring(1, s.length - 1);
     var depth = 0;
     var wrapsWhole = true;
@@ -26,7 +11,6 @@ String cleanAuthor(String raw) {
       if (c == '[') depth++;
       if (c == ']') depth--;
       if (depth < 0) {
-        // 内层提前闭合 → 首尾方括号不是一对
         wrapsWhole = false;
         break;
       }
@@ -50,7 +34,6 @@ class Comic {
   final bool isFavorite;
   final String source;
 
-  /// 热度（点赞数或浏览量），用于卡片角标
   final int? heat;
 
   const Comic({
@@ -74,8 +57,6 @@ class Comic {
     return Comic(
       id: '${j['id']}',
       name: (j['name'] ?? '').toString(),
-      // 详情接口的 author 会被服务端包一层方括号（如 '[N/A]'），
-      // 而列表接口不带。统一剥离外层 []，避免详情页显示成 "[作者]"。
       author: cleanAuthor((j['author'] ?? '').toString()),
       category: cat is Map ? cat['title']?.toString() : null,
       categorySub: sub is Map ? sub['title']?.toString() : null,
@@ -152,11 +133,6 @@ class AlbumDetail {
   final bool isAids;
   final String price;
 
-  /// 当前用户是否已点赞（服务端 `liked` 字段）。
-  ///
-  /// 实测 album 接口确实返回 `liked` 与 `is_favorite`，
-  /// 之前没解析 → 每次进详情页点赞按钮都是「未点赞」状态，
-  /// 用户点了之后重进又变回去。
   final bool liked;
 
   const AlbumDetail({

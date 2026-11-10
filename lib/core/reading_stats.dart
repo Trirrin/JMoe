@@ -2,19 +2,15 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 板块类型。
 enum StatType { comic, novel, video }
 
-/// 单个板块的统计。
 class TypeStats {
   int seconds = 0;
   int chapters = 0;
   int pages = 0;
 
-  /// 读过的不重复作品 id
   final Set<String> works = {};
 
-  /// 按天累计秒数
   final Map<String, int> daily = {};
 
   int get todaySeconds => daily[_dayKey(DateTime.now())] ?? 0;
@@ -84,21 +80,18 @@ String _dayKey(DateTime d) =>
     '${d.year}-${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
-/// 全局统计：三个板块互不混淆。
 class ReadingStats {
   ReadingStats._();
   static final ReadingStats instance = ReadingStats._();
 
   static const _key = 'reading_stats_v2';
 
-  /// 三个板块独立数据
   final Map<StatType, TypeStats> byType = {
     StatType.comic: TypeStats(),
     StatType.novel: TypeStats(),
     StatType.video: TypeStats(),
   };
 
-  // ---- 全局缓存统计（与板块无关）----
   int cacheHits = 0;
   int cacheMisses = 0;
   int bytesSaved = 0;
@@ -107,7 +100,6 @@ class ReadingStats {
 
   TypeStats of(StatType t) => byType[t]!;
 
-  // ---- 汇总（概览用）----
   int get totalSeconds =>
       byType.values.fold<int>(0, (a, b) => a + b.seconds);
   int get totalChapters =>
@@ -118,10 +110,6 @@ class ReadingStats {
   int get todaySeconds =>
       byType.values.fold<int>(0, (a, b) => a + b.todaySeconds);
 
-  /// 三个板块合并后的「按天秒数」，供日历使用。
-  ///
-  /// 日历要按天显示阅读活跃度，而 `daily` 存在各板块内部，
-  /// 所以这里做一次聚合（同一天多板块相加）。
   Map<String, int> get mergedDaily {
     final out = <String, int>{};
     for (final t in byType.values) {
@@ -132,7 +120,6 @@ class ReadingStats {
     return out;
   }
 
-  /// 汇总的 7 日曲线（三板块相加）
   List<({String day, int seconds})> get last7Days {
     final out = <({String day, int seconds})>[];
     for (var i = 6; i >= 0; i--) {
@@ -148,7 +135,6 @@ class ReadingStats {
   }
 
   int get streakDays {
-    // 任一板块当天有阅读即算连续
     final days = <String>{};
     for (final t in byType.values) {
       t.daily.forEach((k, v) {
@@ -170,9 +156,6 @@ class ReadingStats {
     return streak;
   }
 
-  // ---- 记录 ----
-
-  /// 累计某板块的阅读时长。
   Future<void> addSeconds(StatType type, int sec) async {
     if (sec <= 0) return;
     final t = of(type);
@@ -182,7 +165,6 @@ class ReadingStats {
     await save();
   }
 
-  /// 记录一次阅读（章节 / 篇章 / 视频）。
   Future<void> recordChapter({
     required StatType type,
     required String workId,
@@ -204,8 +186,6 @@ class ReadingStats {
     }
     await save();
   }
-
-  // ---- 持久化 ----
 
   Future<void> load() async {
     if (_inited) return;
@@ -235,7 +215,6 @@ class ReadingStats {
   Future<void> save() async {
     try {
       final sp = await SharedPreferences.getInstance();
-      // 每板块只保留最近 400 天
       for (final t in byType.values) {
         if (t.daily.length > 400) {
           final keys = t.daily.keys.toList()..sort();

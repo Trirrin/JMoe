@@ -4,10 +4,6 @@ import 'models.dart';
 import 'source.dart';
 import 'l10n.dart';
 
-/// e-hentai 数据源适配器：把 HTML 解析结果映射到统一的 ComicSource。
-///
-/// 关键设计：EH 的「画廊」映射成 Comic + 单章（整本作为一章），
-/// 阅读时逐页解析 `/s/<key>/<gid>-<n>` 得到原图地址。
 class EhSource implements ComicSource {
   EhSource._();
   static final EhSource instance = EhSource._();
@@ -34,10 +30,6 @@ class EhSource implements ComicSource {
 
   @override
   Future<HomeFeed> home({int page = 1}) async {
-    // 首页与两个热门分类并发抓取。
-    //
-    // 逐个宽容：任何一个失败都不该让整页白掉 —— 只要还有一路成功
-    // 就照常展示；全部失败才抛异常（由首页显示「加载失败 + 重试」）。
     final urls = [
       (_service.popularUrl(page: 1), L.t('latestUpload')),
       (_service.categoryUrl('doujinshi', page: 1), L.t('doujinshi')),
@@ -171,7 +163,6 @@ class EhSource implements ComicSource {
     );
   }
 
-  /// 缓存已解析的画廊，避免阅读时重复抓详情页。
   final Map<String, EHGallery> _galleryCache = {};
 
   @override

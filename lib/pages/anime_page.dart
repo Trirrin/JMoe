@@ -6,8 +6,6 @@ import '../core/l10n.dart';
 import '../widgets/common_widgets.dart';
 import 'anime_player_page.dart';
 
-/// 动漫（官方 videos 接口）。
-/// 支持：分类（动画/影片）、搜索、分页。
 class AnimePage extends StatefulWidget {
   const AnimePage({super.key});
 
@@ -27,7 +25,6 @@ class _AnimePageState extends State<AnimePage> {
   String? _error;
   String _type = 'hanime';
 
-  /// 官方 video_type 取值
   static const _types = <(String, String)>[
     ('hanime', 'animeTypeHanime'),
     ('movie', 'animeTypeMovie'),
@@ -102,8 +99,6 @@ class _AnimePageState extends State<AnimePage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(L.t('anime')),
-        // 搜索入口已移除：全站统一用发现页的搜索（切到「视频」板块即可）。
-        // 板块内再放搜索框只会让用户分不清该用哪个。
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(42),
           child: SizedBox(

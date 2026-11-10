@@ -25,12 +25,10 @@ import 'search_page.dart';
 import 'unified_reader_page.dart';
 import '../core/l10n.dart';
 
-/// 统一详情页：JM 与 e-hentai 共用同一套布局与交互。
 class UnifiedDetailPage extends StatefulWidget {
   final ComicSource source;
   final Comic comic;
 
-  /// 列表页卡片的 Hero tag（转场起点）。为空则用默认 tag。
   final String? coverTag;
 
   const UnifiedDetailPage({
@@ -52,26 +50,21 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   bool _descExpanded = false;
   bool _chaptersExpanded = false;
 
-  /// 当前选中的章节索引（仅选中，不播放）
   int _selectedChapter = 0;
 
-  /// 用户是否在选集中主动点选过章节（决定右下角按钮播哪一话）。
   bool _userPickedChapter = false;
   bool _liked = false;
 
   Comic get _comic => _info?.comic ?? widget.comic;
 
-  /// 作品编号：JM 为纯数字 ID，e-hentai 为画廊 ID。
   String get _serial => _comic.id.replaceFirst('eh:', '');
 
-  /// 复制/分享用的编号：JM 源带 "JM" 前缀，EH 源为纯 gid。
   String get _serialForCopy =>
       widget.source.id == 'jm' ? 'JM$_serial' : _serial;
 
   @override
   void initState() {
     super.initState();
-    // 固定列表页带来的封面，避免详情加载后换址导致闪白
     final c = widget.source.coverOf(widget.comic);
     if (c != null && c.isNotEmpty) _pinnedCover = c;
     _fav = widget.comic.isFavorite ||
@@ -85,7 +78,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // 监听本页 route 的动画：Hero 飞行 = 路由正在过渡。
     final anim = ModalRoute.of(context)?.animation;
     if (anim != null && anim != _routeAnim) {
       _routeAnim?.removeListener(_onRouteAnim);
@@ -99,12 +91,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   void _onRouteAnim() {
     final v = _routeAnim?.value ?? 1.0;
     final flying = v > 0.001 && v < 0.999;
-    // 只维护「是否飞行中」（用于 IgnorePointer）。
-    //
-    // **不再用透明度隐藏 FAB**：二值切换会有「突然出现」的观感，
-    // 渐变又晚一帧会闪。真正的解法是交给 Hero 的 placeholderBuilder —
-    // Hero 飞行时自动用占位替换源控件，落位后恢复，
-    // 时机完全由框架控制，没有一帧误差。
     if (flying != _heroFlying) {
       if (!mounted) return;
       setState(() => _heroFlying = flying);
@@ -117,14 +103,10 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     super.dispose();
   }
 
-  /// 是否已订阅该作品的更新
   bool _subscribed = false;
 
-  /// Hero 是否正在飞行（飞行期间隐藏 FAB，避免被飞行层遮挡）
   bool _heroFlying = false;
 
-
-  /// 切换订阅：订阅后 App 会定期检查新章节并推送系统通知。
   Future<void> _toggleSubscribe() async {
     HapticFeedback.lightImpact();
     final id = widget.comic.id;
@@ -142,7 +124,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         name: _comic.name,
         cover: _cover ?? '',
         source: widget.source.id,
-        // 以当前章节数为基线，之后变多了才通知
         chapterCount: chapters.length,
         lastChapterId: chapters.isEmpty ? '' : chapters.last.id,
         createdAt: DateTime.now().millisecondsSinceEpoch,
@@ -166,7 +147,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         _loading = false;
         _fav = info.comic.isFavorite || _fav;
         _liked = info.comic.liked || info.liked;
-        // 默认选中：上次阅读的章节，否则第 1 话
         final lastRead = AppState.instance.lastReadFor(_comic.id);
         final idx = info.chapters
             .indexWhere((c) => c.id == (lastRead?.chapterId ?? ''));
@@ -181,10 +161,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     }
   }
 
-  /// 详情加载后服务端可能返回与列表页不同的封面地址，
-  /// 直接切换会导致内存缓存命不中、重新解码 → 封面闪白。
-  /// 因此：一旦从列表页带来了封面就固定用它，
-  /// 除非列表页没有封面才用详情页的。
   String? _pinnedCover;
 
   String? get _cover {
@@ -198,24 +174,8 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
           ? L.t('continueReading')
           : L.t('startReading');
 
-  /// 详情页 FAB 本体：进入即刻显示「开始阅读」，不等章节接口返回。
-  ///
-  /// 配色固定为 primaryContainer，与 Hero 飞行层一致，
-  /// 任何状态下都不变色，只切换文字（开始阅读 / 继续阅读）。
-  /// 详情页右下角按钮。
-  ///
-  /// **自绘静态容器**（不用 FloatingActionButton）：
-  /// FAB 内部有 splash / elevation / scale 的自带动画，
-  /// Hero 落位、真控件第一次上屏时会把这些动画播一遍 → 闪烁。
-  /// 静态容器没有入场动画，落位即最终态。
-  ///
-  /// 几何与列表侧圆钮对齐（高 56、圆角 16），两端尺寸一致，
-  /// Hero 飞行时不会出现尺寸突变。
   Widget _buildDetailFab() {
     final scheme = Theme.of(context).colorScheme;
-    // 只有章节已加载且非空时才可点。
-    // 章节没回来之前按钮是「禁用态」（灰化 + 不响应），
-    // 避免「点了没反应，加载完才突然跳走」。
     final ready = _info != null && (_info!.chapters.isNotEmpty);
     return Material(
       color: ready
@@ -236,8 +196,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (!ready)
-                  // 未就绪：显示小转圈而不是播放图标，
-                  // 让用户明确知道「正在准备」而非「按钮坏了」
                   SizedBox(
                     width: 18,
                     height: 18,
@@ -271,27 +229,18 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// 进入阅读：
-  /// - 若用户在选集中手动选过章节（_selectedChapter 非默认续读项），播放该话；
-  /// - 否则按上次进度续读；无记录则第 1 话第 1 页。
   Future<void> _enterReading() async {
-    // 章节还没加载完 → 这里不该被触发（按钮此时是禁用态）。
-    // 之前是「先 await _load() 再跳转」，用户点了没反应、
-    // 直到加载完成才突然跳走 —— 现在改成按钮禁用，
-    // 点击要么立即跳，要么明确不可点。
     if (_info == null) return;
     final chapters = _info?.chapters ?? const <Chapter>[];
     if (chapters.isEmpty) return;
 
     final last = AppState.instance.lastReadFor(_comic.id);
 
-    // 用户主动选了某话 → 播该话
     if (_userPickedChapter) {
       await _openReader(_selectedChapter);
       return;
     }
 
-    // 按本地阅读记录定位：该话 + 该页；无记录则第 1 话
     var chapterIndex = 0;
     var page = 1;
     if (last != null) {
@@ -304,7 +253,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     await _openReader(chapterIndex, startPage: page);
   }
 
-  /// 点击作者：按作者名搜索作品。
   void _searchAuthor(String author) {
     final name = author.trim();
     if (name.isEmpty) return;
@@ -320,20 +268,17 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// 轻提示：走自绘 Toast（有入场/出场动画，不顶 FAB、不排队）。
   void _toast(String msg, {IconData? icon, Color? accent}) {
     if (!mounted) return;
     AppToast.show(context, msg, icon: icon, accent: accent);
   }
 
-  /// 复制编号。
   Future<void> _copySerial() async {
     await Clipboard.setData(ClipboardData(text: _serialForCopy));
     HapticFeedback.lightImpact();
     _toast('已复制${widget.source.id == 'jm' ? L.t('jmId') : L.t('galleryId')}：$_serial');
   }
 
-  /// 系统分享（文本）。
   Future<void> _share() async {
     final ok = await ShareUtil.shareComic(
       sourceId: widget.source.id,
@@ -349,7 +294,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     HapticFeedback.lightImpact();
     final target = !_fav;
 
-    // ---- 1) 本地优先：立即生效（离线也能用，永远"成功"）----
     setState(() => _fav = target);
     await AppState.instance.setLocalFavorite(
       {
@@ -370,12 +314,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
       accent: target ? const Color(0xFFFF6B81) : null,
     );
 
-    // ---- 2) 云端同步（幂等 + 失败入队重试）----
-    //
-    // 关键点：云端接口是**切换**语义，直接重发可能把状态翻反。
-    // 所以统一走 setFavorite（读状态 → 必要时切一次 → 回读校验）。
-    // 取消收藏失败时**必须入队**，否则本地删了、云端还在，
-    // 下次刷新就"复活"，用户会认为移除没生效。
     if (AppState.instance.loggedIn && widget.source.id == 'jm') {
       unawaited(() async {
         final r = await JmService.instance.setFavorite(
@@ -387,14 +325,12 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
           await AppState.instance.dequeueUnfavorite(_comic.id);
           return;
         }
-        // 失败：留痕 + 入队等重试
         unawaited(AppLog.instance.log(
           'FAV',
           'setFavorite($target) failed id=${_comic.id} err=${r.error}',
         ));
         print('[JMOE] favorite sync failed: ${r.error}');
         if (!target) {
-          // 取消收藏失败 → 进重试队列
           await AppState.instance.queueUnfavorite(_comic.id);
         }
       }());
@@ -404,9 +340,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   Future<void> _openReader(int index, {int startPage = 1}) async {
     final chapters = _info?.chapters ?? const <Chapter>[];
     if (chapters.isEmpty) return;
-    // 离线模式：优先打开已下载的该章（本地文件），不发起网络请求。
-    // 依然复用 UnifiedReaderPage（只是数据源换成磁盘），
-    // 界面与在线完全一致。
     if (AppState.instance.offlineMode) {
       final ch = chapters[index.clamp(0, chapters.length - 1)];
       unawaited(_openLocal(ch, startPage: startPage));
@@ -424,13 +357,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         ),
       ),
     );
-    // **阅读器返回后刷新本页状态**（只是 setState 重建 UI，
-    // 不会重新拉取元数据 —— _load() 只在 initState 里调用）。
-    //
-    // 之前这里没有 await，push 后立刻走完 —— 用户在阅读器里翻到
-    // 第 3 话再退出，详情页不重建：章节列表选中的还是进去前那一话、
-    // FAB 文案还是「开始阅读」。这两处都读 AppState.lastReadFor()，
-    // 数据变了但没人通知 UI。
     if (!mounted) return;
     final last = AppState.instance.lastReadFor(_comic.id);
     if (last == null) return;
@@ -439,10 +365,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     setState(() => _selectedChapter = i);
   }
 
-  /// 打开本地已下载章节。
-  ///
-  /// **复用在线阅读器**（用户明确要求）：不再弹独立的 OfflineReaderPage，
-  /// 而是把 localDir 交给 UnifiedReaderPage，界面/手势/进度全部一致。
   Future<void> _openLocal(Chapter ch, {int startPage = 1}) async {
     final local = await ChapterDownloader.localPages(
       widget.source.id,
@@ -474,8 +396,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      // body 用 Stack：把 FAB 放在内容之上、同一渲染树里，
-      // 这样 Hero 转场时封面飞过也不会盖住按钮。
       body: Stack(
         children: [
           CustomScrollView(
@@ -512,19 +432,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
               ],
             ],
           ),
-          // FAB 作为普通页面内容放在 Stack 末尾（后画的在上层）。
-          //
-          // 为什么回退掉 OverlayPortal：
-          // 详情页按钮：用 Hero（与列表侧圆钮做形变衔接）。
-          //
-          // 这次**不写 flightShuttleBuilder**，用 Hero 原生行为：
-          // Hero 会把目标侧 child 按插值矩形缩放，落位时矩形正好等于
-          // child 的自然尺寸 → 缩放比 1.0，理论上零跳变。
-          //
-          // 之前反复加 FittedBox / 手绘插值 / placeholderBuilder，
-          // 都是在覆盖原生行为 —— 反而让「飞行内容」和「真控件」
-          // 的几何/阴影对不上，落位必闪。
-          // 去掉所有覆盖，交给框架是最稳的。
           Positioned(
             right: 16,
             bottom: 16 + MediaQuery.of(context).padding.bottom,
@@ -554,7 +461,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
           color: _fav ? theme.colorScheme.error : null,
           onTap: _toggleFavorite,
         ),
-        // 订阅更新：有更新时推系统通知
         _RoundBtn(
           icon: _subscribed
               ? Icons.notifications_active
@@ -567,8 +473,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
       ],
       flexibleSpace: FlexibleSpaceBar(
         background: ClipRRect(
-          // 圆角裁剪：Hero 飞行中详情页从卡片尺寸放大到全屏，
-          // 若不加圆角会短暂露出直角
           borderRadius: const BorderRadius.vertical(
             bottom: Radius.circular(16),
           ),
@@ -580,8 +484,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
               filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
               child: Container(color: Colors.black26),
             ),
-            // 渐变过渡到「与下方信息区相同的底色」，
-            // 避免头部黑底与内容区浅底之间出现生硬分界线
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -620,13 +522,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                       child: Hero(
                         tag: widget.coverTag ??
                             'cover_${widget.source.id}_${_comic.id}',
-                        // 飞行层固定用「同一张封面 + 同一个圆角」构造，
-                        // 不引用 from/to 任一方的 widget。
-                        //
-                        // 原因：引用源卡片 widget 时，飞行途中卡片被重建 /
-                        // 滚出 cacheExtent / 图片被 LRU 淘汰都会让飞行层失效；
-                        // 引用目标 widget 又会被 ClipRRect 的裁剪边界影响。
-                        // 独立构造最简单，也永远稳定。
                         flightShuttleBuilder: (ctx, anim, dir, from, to) {
                           final t = Curves.easeInOutCubic.transform(
                             anim.value,
@@ -641,8 +536,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                             child: CachedCover(url: _cover),
                           );
                         },
-                        // 不指定 memCacheWidth：与列表页共用同一份内存缓存，
-                        // 避免 Hero 结束后因解码尺寸不同而重新加载导致封面闪白。
                         child: CachedCover(
                           url: _cover,
                           borderRadius: BorderRadius.circular(10),
@@ -671,7 +564,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // 作者名可点击：跳转搜索该作者的作品
                               Flexible(
                                 child: GestureDetector(
                                   onTap: () => _searchAuthor(_comic.author),
@@ -702,7 +594,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                                   ),
                                 ),
                               ),
-                              // 关注作者：之后可在「关注」里快速找到其全部作品
                               const SizedBox(width: 6),
                               GestureDetector(
                                 onTap: _toggleFollowAuthor,
@@ -747,8 +638,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                           spacing: 6,
                           runSpacing: 4,
                           children: [
-                            // 页数占位：加载完成前先用等宽占位符撑住位置，
-                            // 避免数据到达后「突然多出一个 pill」把文字挤动。
                             if (_info == null)
                               Opacity(
                                 opacity: 0.35,
@@ -781,7 +670,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// 编号行：显示 JM 号 / EH ID，点击复制，右侧可跳搜索。
   Widget _buildSerialRow(ThemeData theme) {
     final scheme = theme.colorScheme;
     final isJm = widget.source.id == 'jm';
@@ -802,7 +690,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    // JM 用 # 标签图标；EH 用链接图标
                     isJm ? Icons.tag : Icons.link_rounded,
                     size: 14,
                     color: scheme.onPrimaryContainer,
@@ -854,9 +741,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   Widget _buildStats(ThemeData theme) {
     final scheme = theme.colorScheme;
     final info = _info!;
-    // 点赞 / 评论从「小一号的统计胶囊」提升为**两个大按钮**，
-    // 与其它只读统计（浏览量/话数/页数）明确区分开。
-    // 之前它们和浏览量长得一样，用户根本不知道能点。
     final items = <Widget>[
       if (info.views > 0)
         _StatChip(
@@ -878,7 +762,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         ),
     ];
 
-    // 大按钮行：点赞 + 评论
     final actions = <Widget>[
       if (info.likes > 0 || true)
         Expanded(
@@ -895,7 +778,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
           ),
         ),
       if (widget.source.id == 'jm') ...[
-        // 两个按钮之间留足间距（之前紧贴在一起，看起来像一个控件）
         const SizedBox(width: 12),
         Expanded(
           child: _BigAction(
@@ -919,12 +801,10 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 可点击的**大按钮**（点赞 / 评论）：一眼能看出能点
           if (actions.isNotEmpty)
             Row(children: actions),
           if (actions.isNotEmpty && items.isNotEmpty)
             const SizedBox(height: 10),
-          // 只读统计（浏览量 / 话数 / 页数）
           if (items.isNotEmpty)
             Wrap(spacing: 8, runSpacing: 8, children: items),
         ],
@@ -932,20 +812,9 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// 点赞（**后台执行**，退出详情页也继续）。
-  ///
-  /// 用户要求：
-  ///  * 点下去立刻变红（本地先行，不等网络）
-  ///  * 即使马上退出详情页，请求也要继续发出
-  ///  * 失败时弹 toast，并把红色取消
-  ///
-  /// 所以请求走 `LikeService`（全局单例，不绑定本页 State），
-  /// 这样页面 dispose 后请求照样跑完。失败回调用全局 messenger 提示，
-  /// 不依赖本页是否还活着。
   Future<void> _toggleLike() async {
     HapticFeedback.lightImpact();
     final target = !_liked;
-    // 1) 立即反馈：按钮变红 + 数字 +/-1
     setState(() {
       _liked = target;
       if (_info != null) {
@@ -965,13 +834,11 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         );
       }
     });
-    // 2) 后台发送（不 await；页面关掉也会继续）
     final albumId = _comic.id;
     final messenger = ScaffoldMessenger.of(context);
     BackgroundTaskService.instance.like(
       albumId,
       onFailed: () {
-        // 失败：弹 toast + 把按钮恢复
         messenger.showSnackBar(
           SnackBar(
             content: Text(L.t('likeFailed')),
@@ -1003,7 +870,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// e-hentai 等源的元信息（分类/上传者/语言/评分…）。
   Widget _buildMeta(ThemeData theme) {
     final scheme = theme.colorScheme;
     return Padding(
@@ -1048,31 +914,25 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// 下载整章到本地（带进度弹层）。
-  /// 正在下载的章节 id 集合（用于即时反馈图标状态）
   final Set<String> _downloading = {};
 
-  /// 下载单章：点击立即反馈，随后后台下载。
   Future<void> _downloadChapter(int index) async {
     final chapters = _info?.chapters ?? const <Chapter>[];
     if (index < 0 || index >= chapters.length) return;
     final ch = chapters[index];
 
-    // ---- 1) 立刻反馈：图标转圈 + 轻提示 ----
     if (_downloading.contains(ch.id)) return;
     setState(() => _downloading.add(ch.id));
     HapticFeedback.selectionClick();
     _toast(L.t('downloadStarted'));
 
     try {
-      // ---- 2) 准备数据（这一步可能慢，但用户已看到反馈） ----
       final bundle = await widget.source.read(_comic, ch);
       if (bundle.length == 0) {
         _toast(L.t('noImages'));
         return;
       }
 
-      // ---- 3) 后台下载：不弹模态框，进度见「下载」页 ----
       final task = ChapterDownloader.start(
         source: widget.source,
         albumName: _comic.name,
@@ -1080,8 +940,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         albumId: _comic.id,
         chapterName: ch.name,
         coverUrl: _cover,
-        // 作品级数据（多个选集共用一份 album.json）：
-        // 这样离线 / 导出后仍有作者、简介、标签，能展示完整详情。
         albumExtra: {
           'author': _comic.author,
           'description': _info?.description ?? '',
@@ -1093,7 +951,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         },
       );
 
-      // 监听完成（用轮询，简单可靠）
       unawaited(() async {
         while (!task.done) {
           await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -1113,16 +970,10 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     }
   }
 
-
-  /// 章节列表视图：列表 → 并排（两列） → 数字格
   int _chapterView = 0;
 
-  /// 章节排序：false = 第一话到最新（默认），true = 最新到第一话
   bool _chapterDesc = false;
 
-  /// 按当前排序返回章节列表（附带原始索引，供选中态使用）。
-  ///
-  /// 注意：索引必须跟着走，否则「选中第 3 话」在倒序下会指到别的章。
   List<(int, Chapter)> _sortedChapters() {
     final list = _info?.chapters ?? const <Chapter>[];
     final idx = List<int>.generate(list.length, (i) => i);
@@ -1146,7 +997,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 视图切换：列表 → 并排 → 数字格 → 回到列表
               IconButton(
                 visualDensity: VisualDensity.compact,
                 tooltip: L.t('chapterView'),
@@ -1162,7 +1012,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                   _chapterView = (_chapterView + 1) % 3;
                 }),
               ),
-              // 排序切换：正序 ↔ 倒序
               IconButton(
                 visualDensity: VisualDensity.compact,
                 tooltip: _chapterDesc
@@ -1193,10 +1042,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
           padding: const EdgeInsets.symmetric(
             horizontal: AppStyle.pagePadding,
           ),
-          // 三种视图各自排布：
-          //  0 列表（每行一章，信息最全）
-          //  1 并排（两列，行数减半，仍显示章名）
-          //  2 数字格（只显示编号，一屏看到最多章节）
           child: _chapterView == 0
               ? Column(
                   children: [
@@ -1279,13 +1124,8 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// 是否已关注该作者
   bool _followAuthor = false;
 
-  /// 关注 / 取消关注作者。
-  ///
-  /// 关注后可在「关注」页点该作者，直接看他的全部作品；
-  /// 也能在订阅检查里收到该作者的更新通知。
   Future<void> _toggleFollowAuthor() async {
     HapticFeedback.lightImpact();
     final a = _comic.author.trim();
@@ -1303,9 +1143,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// 该书是否已被标记为书签。  ///
-  /// 书签与「阅读进度 / 收藏」都不同：它标记的是**这一话很精彩**，
-  /// 用户可以在书签总览里一眼找回，不必记得话号。
   bool _isBookmarked(Chapter c) =>
       AppState.instance.isChapterBookmarked(_comic.id, c.id);
 
@@ -1385,7 +1222,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                   ),
                 ),
               ),
-              // 书签：标记「这一话很精彩」，可在书签总览里快速找回
               InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => _toggleChapterBookmark(c),
@@ -1402,7 +1238,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                   ),
                 ),
               ),
-              // 单话下载
               InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => _downloadChapter(index),
@@ -1415,8 +1250,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                   ),
                 ),
               ),
-              // 行尾不再放 ✓/○：整行背景色 + 文字加粗已经能区分
-              // 「当前选中」与其它，再加一个圆圈图标是重复信息。
             ],
           ),
         ),
@@ -1424,7 +1257,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     );
   }
 
-  /// 标签区：pixiv 风格胶囊标签（实心底色 + 全圆角），点击直接跳转搜索。
   Widget _buildTags(ThemeData theme) {
     final scheme = theme.colorScheme;
     final tags = _info!.tags;
@@ -1447,9 +1279,6 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
                   (t) => TagChip(
                     tag: t,
                     onTap: () {
-                      // 直接打开搜索页并带上关键词：
-                      // 不能只 pop + requestSearch —— 搜索页可能不在路由栈上，
-                      // 那样点击后只会回到列表，看不到搜索结果。
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => SearchPage(
@@ -1572,13 +1401,6 @@ class _RoundBtn extends StatelessWidget {
   }
 }
 
-/// 详情页的大号操作按钮（点赞 / 评论）。
-///
-/// 与 [_StatChip]（只读统计）刻意做成不同视觉：
-///  * 更大：高 44，圆角 12，占满一半宽度
-///  * 有底色 + 描边 → 看起来就是「按钮」
-///  * 带文字提示（点赞 / 评论），而不只是一个数字
-/// 这样用户一眼就知道这两处能点，不会像之前那样误以为只是统计数字。
 class _BigAction extends StatelessWidget {
   const _BigAction({
     required this.icon,
@@ -1593,7 +1415,6 @@ class _BigAction extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  /// 按钮下方的动作名（点赞 / 评论）
   final String hint;
   final ColorScheme scheme;
   final bool active;
@@ -1604,7 +1425,6 @@ class _BigAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = color ?? scheme.primary;
     final fg = active ? accent : scheme.onSurface;
-    // 圆角 22（接近胶囊）：比之前的 12 明显更圆润
     const radius = 22.0;
     return Material(
       color: active
@@ -1650,9 +1470,6 @@ class _BigAction extends StatelessWidget {
   }
 }
 
-/// 只读统计胶囊（浏览量 / 话数 / 页数）。
-///
-/// 刻意做得比 [_BigAction] 小且无描边：它们是信息而非操作。
 class _StatChip extends StatelessWidget {
   final IconData icon;
   final String label;

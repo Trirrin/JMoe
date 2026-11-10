@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 阅读主题（背景 / 文字 / 辅助色）。
 class ReaderTheme {
   final String id;
   final Color bg;
@@ -26,77 +25,54 @@ class ReaderTheme {
       all.firstWhere((t) => t.id == id, orElse: () => all.first);
 }
 
-/// 翻页模式。
 enum PageMode {
-  /// 仿真覆盖
   cover,
 
-  /// 左右平移
   slide,
 
-  /// 无动画
   none,
 
-  /// 上下滚动
   scroll,
 }
 
-/// 阅读设置：全量排版 / 主题 / 交互参数，持久化到 SharedPreferences。
 class ReaderSettings extends ChangeNotifier {
   ReaderSettings._();
   static final ReaderSettings instance = ReaderSettings._();
 
   static const _key = 'reader_settings_v2';
 
-  // ---- 排版 ----
   double fontSize = 18;
   double lineHeight = 1.85;
   double letterSpacing = 0;
   double paragraphSpacing = 14;
   double marginH = 20;
   double marginV = 14;
-  double indent = 2; // 首行缩进（em）
+  double indent = 2;
 
   TextAlign align = TextAlign.justify;
-  int weightIndex = 0; // 0=常规 1=中等 2=粗体
-  int fontIndex = 0; // 0=默认 1=衬线
+  int weightIndex = 0;
+  int fontIndex = 0;
 
-  // ---- 主题 ----
   String themeId = 'paper';
   bool followSystemTheme = false;
 
-  // ---- 交互 ----
   PageMode pageMode = PageMode.slide;
   bool volumeKeyTurn = true;
   bool showProgress = true;
   bool showBattery = true;
   bool keepScreenOn = true;
-  double brightness = 0; // -1..1，0 表示跟随系统
+  double brightness = 0;
 
-  // ---- 朗读 ----
-  /// 语速（0.5 ~ 3.0）
   double ttsRate = 1.0;
 
-  /// 音调（0.5 ~ 2.0）
   double ttsPitch = 1.0;
 
-  /// 选中的音色名称（空 = 系统默认）
   String ttsVoiceName = '';
 
-  /// 自动滚动速度（像素/秒）
   double autoScrollSpeed = 40;
 
-  // ---- 统计 ----
   int readingSecondsTotal = 0;
 
-  /// 当前生效的阅读主题。
-  ///
-  /// 开启「跟随 App 设置」时，按 **JMoe 自身的深浅色设置** 决定
-  /// （不是系统设置）：
-  ///   App 深色 → dark，App 浅色 → paper
-  /// App 的 themeMode 若为 system，则此时才回落到系统亮度。
-  ///
-  /// 关闭时使用用户手动选择的 themeId。
   ReaderTheme get theme {
     if (!followSystemTheme) return ReaderTheme.byId(themeId);
 
@@ -104,22 +80,18 @@ class ReaderSettings extends ChangeNotifier {
     return ReaderTheme.byId(appDark ? 'dark' : 'paper');
   }
 
-  /// App 当前是否深色（跟随 AppState 的主题设置）。
   bool _appIsDark() {
     try {
-      // 延迟导入避免 core 层循环依赖
       final mode = appThemeMode?.call();
       if (mode != null) {
         if (mode == 'dark') return true;
         if (mode == 'light') return false;
       }
     } catch (_) {}
-    // system 或未注入时回落到系统亮度
     return WidgetsBinding.instance.platformDispatcher.platformBrightness ==
         Brightness.dark;
   }
 
-  /// 由 App 启动时注入，读取 AppState.themeMode.name
   static String? Function()? appThemeMode;
 
   FontWeight get weight => switch (weightIndex) {
@@ -145,8 +117,6 @@ class ReaderSettings extends ChangeNotifier {
         fontFamily: fontFamily,
         color: t.fg,
       );
-
-  // ---- 持久化 ----
 
   Future<void> load() async {
     try {

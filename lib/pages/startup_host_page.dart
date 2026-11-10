@@ -9,13 +9,6 @@ import '../core/jm_service.dart';
 import '../core/l10n.dart';
 import '../widgets/app_toast.dart';
 
-/// 启动线路页：并发测速 → 展示结果 → 用户可自行选线进入。
-///
-/// 规则：
-///  * 测速完成后开始 10 秒倒计时；**用户一旦手动选线即取消计时**
-///  * 只有测速成功的线路可选（失败项不可点击）
-///  * 全部失败时禁止进入，提示用户检查网络并重试
-///  * 支持「重新测速」
 class StartupHostPage extends StatefulWidget {
   final VoidCallback onReady;
 
@@ -30,10 +23,8 @@ class _HostResult {
   final String label;
   final int? latency;
 
-  /// 线路固定编号（1 起），来自线路表的原始顺序，**永不随测速结果改变**。
   final int order;
 
-  /// 是否为图片源（图片源与 API 线路分两组展示）
   final bool isImage;
 
   _HostResult(this.host, this.label, this.latency, this.order,
@@ -45,13 +36,10 @@ class _HostResult {
 class _StartupHostPageState extends State<StartupHostPage> {
   final List<_HostResult> _results = [];
 
-  /// 图片源测速结果（单独一组，与 API 线路并列展示）
   final List<_HostResult> _imgResults = [];
 
-  /// 选中的图片源（默认第一个）
   String? _selectedImg;
 
-  /// 最快的图片源（测速完成后计算，用于打「最快」标记）
   String? _bestImg;
 
   bool _testing = true;
@@ -71,13 +59,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
     _start();
   }
 
-  /// 固定线路快进：若用户开启了「跳过启动页」，
-  /// 直接用**上次进入所用的线路**连接并进入主界面。
-  ///
-  /// 设计要点（按用户要求）：
-  ///  * 「跳过启动页」是**独立开关**，不绑定某条具体线路
-  ///  * 跳过后使用「最后一次进入的线路」（lastHost），没有则用 apiHost
-  ///  * 该线路连不通时**回落到正常启动页**，避免用户被死线路卡住
   Future<bool> _tryPinnedShortcut() async {
     if (!HostStore.instance.skipStartup) return false;
     final api = JmApi.instance;
@@ -89,14 +70,12 @@ class _StartupHostPageState extends State<StartupHostPage> {
     if (preferred.isEmpty) return false;
     await api.loadHostList();
     if (!mounted) return false;
-    // 确保候选表里有这条线路（可能是用户自定义的）
     if (!api.hosts.any((h) => h[0] == preferred)) {
       api.hosts = [
         ...api.hosts,
         [preferred, preferred],
       ];
     }
-    // 轻量探活：能通就直接进，失败则回落到正常启动页
     final ms = await api.measure(preferred);
     if (!mounted) return false;
     if (ms == null) {
@@ -134,7 +113,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
       _secondsLeft = 3;
     });
 
-    // 开了「跳过启动页」→ 直接用上次的线路进（失败会回落到正常流程）
     if (await _tryPinnedShortcut()) return;
     if (!mounted) return;
 
@@ -144,8 +122,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
     await api.loadHostList();
     if (!mounted) return;
 
-    // 合并自定义线路：用户添加的线路要出现在这里，
-    // 否则「启动时也能看到」这个诉求就不成立。
     final hosts = HostStore.instance.mergeWith(api.hosts);
     setState(() {
       for (var idx = 0; idx < hosts.length; idx++) {
@@ -158,9 +134,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
           idx + 1,
         ));
       }
-      // 图片源：与 API 线路并列测速。
-      // 默认选中**第一个**（按用户要求），之后测速完成也不改选，
-      // 免得用户刚想选就被自动切换打乱。
       final imgHosts = JmService.instance.imgHostCandidates;
       for (var idx = 0; idx < imgHosts.length; idx++) {
         _imgResults.add(_HostResult(
@@ -175,7 +148,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
     });
 
     await Future.wait([
-      // API 线路测速
       ...hosts.map((h) async {
         final ms = await api.measure(h[0]);
         if (!mounted) return;
@@ -192,7 +164,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
           }
         });
       }),
-      // 图片源测速
       ..._imgResults.map((r) async {
         final ms = await JmService.instance.measureImgHost(r.host);
         if (!mounted) return;
@@ -215,7 +186,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
 
     setState(() {
       _testing = false;
-      // API 线路：列表顺序保持原顺序（编号固定），只算最快项并选中
       _best = _anyOk
           ? (_results.where((r) => r.ok).toList()
                 ..sort((a, b) =>
@@ -224,19 +194,14 @@ class _StartupHostPageState extends State<StartupHostPage> {
               .host
           : null;
       _selected = _best;
-      // 图片线路：测速完成后**改选最快的**（默认先选第一个，测完再切换）。
-      // 用户要求：「图片线路默认选第一个，测完速再选最快的」。
       final okImgs = _imgResults.where((r) => r.ok).toList()
         ..sort((a, b) =>
             (a.latency ?? 99999).compareTo(b.latency ?? 99999));
       if (okImgs.isNotEmpty) _selectedImg = okImgs.first.host;
-      // 记录最快的图片源，用于给它打「最快」标记
       _bestImg = okImgs.isNotEmpty ? okImgs.first.host : null;
     });
 
     if (_best != null) {
-      // 只选中，不切换：等用户点「应用」或倒计时结束再应用
-      // 若用户关闭了「启动页自动进入」，则不启动倒计时
       if (AppState.instance.autoEnterStartup) {
         _startCountdown();
       } else {
@@ -272,7 +237,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
     _entering = true;
     await JmApi.instance.switchHostQuiet(host);
     await AppState.instance.setLastHost(host);
-    // 同时应用选中的图片源（默认第一个）
     final img = _selectedImg;
     if (img != null && img.isNotEmpty) {
       JmService.instance.setImgHost(img);
@@ -282,9 +246,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
     widget.onReady();
   }
 
-  /// 离线模式：跳过测速与线路选择，直接进入主界面。
-  ///
-  /// 只使用本地已下载 / 已缓存内容，不发起任何网络请求。
   Future<void> _enterOffline() async {
     _countdown?.cancel();
     if (_entering) return;
@@ -294,15 +255,13 @@ class _StartupHostPageState extends State<StartupHostPage> {
     widget.onReady();
   }
 
-  /// 点击线路：只改变选中项，不立即应用（应用由底部按钮确认）。
   void _pick(String host) {
     final r = _results.firstWhere((e) => e.host == host);
-    if (!r.ok) return; // 失败线路不可选
+    if (!r.ok) return;
     setState(() {
       _selected = host;
       _userInteracted = true;
     });
-    // 只停倒计时，**不中断测速**：其余线路继续在后台测
     _countdown?.cancel();
   }
 
@@ -313,7 +272,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
 
     final String statusText;
     if (_userInteracted) {
-      // 已手选：若还在测速，说明「后台继续测速」
       statusText = _testing
           ? L.t('manualSelectedTesting')
           : L.t('manualSelected');
@@ -322,7 +280,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
     } else if (!_anyOk) {
       statusText = L.t('allLinesFailed');
     } else if (_secondsLeft > 0) {
-      // 倒计时已在下方按钮显示，这里不再重复
       statusText = L.t('autoSelecting');
     } else {
       statusText = L.t('entering');
@@ -330,7 +287,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
 
     final String enterLabel;
     if (_userInteracted) {
-      // 手动选过：直接给「进入」，可立即点击
       enterLabel = L.t('applyAndEnter');
     } else if (_testing) {
       enterLabel = L.t('testing');
@@ -359,7 +315,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
                     ),
                   ),
                   const Spacer(),
-                  // 重新测速
                   IconButton(
                     tooltip: L.t('retest'),
                     onPressed: _testing || _entering ? null : _start,
@@ -385,13 +340,11 @@ class _StartupHostPageState extends State<StartupHostPage> {
               Expanded(
                 child: ListView(
                   children: [
-                    // ---- API 线路 ----
                     for (var i = 0; i < _results.length; i++)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: _buildItem(theme, i),
                       ),
-                    // ---- 图片源（并列测速，默认选第一个）----
                     if (_imgResults.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Padding(
@@ -415,7 +368,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              // ---- 跳过启动页（独立开关）----
               InkWell(
                 onTap: () async {
                   await HostStore.instance
@@ -469,10 +421,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  // 进入条件（按用户要求）：
-                  //  * 用户手动选过 API 线路 → **立即可进**（不等图片源测速）
-                  //  * 否则（自动流程）→ 必须**两个都测完**才能进，
-                  //    这样图片源也能选到最快的那个
                   onPressed: _entering ||
                           _selected == null ||
                           (!_userInteracted && _testing)
@@ -485,7 +433,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
                 ),
               ),
               const SizedBox(height: 8),
-              // 离线模式：不联网，直接用已下载 / 已缓存的内容
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -504,7 +451,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
     );
   }
 
-  /// 图片源条目：与 API 线路同样的视觉，但选中态独立。
   Widget _buildImgItem(ThemeData theme, int i) {
     final scheme = theme.colorScheme;
     final r = _imgResults[i];
@@ -556,7 +502,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
                         ),
                       ),
                     ),
-                    // 「最快」标记：图片源也标出最快的那个
                     if (_bestImg == r.host && !_testing) ...[
                       const SizedBox(width: 6),
                       Container(
@@ -595,8 +540,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
     final r = _results[i];
     final active = _selected == r.host;
     final isBest = _best == r.host && !_testing;
-    // 测速进行中也允许选择「已出结果」的线路；
-    // 这样用户不必等全部测完就能进入。
     final selectable = r.ok && !_entering;
 
     return Material(

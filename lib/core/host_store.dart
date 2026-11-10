@@ -3,15 +3,11 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 一条自定义线路。
 class CustomHost {
-  /// 主机名，如 `www.example.com` 或完整 `https://host/`
   final String host;
 
-  /// 显示名（空则用 host）
   final String label;
 
-  /// 备注（可选，方便用户区分来源）
   final String note;
 
   final int at;
@@ -40,11 +36,6 @@ class CustomHost {
       );
 }
 
-/// 线路管理：自定义线路 + 「固定线路」偏好。
-///
-/// 用户诉求：
-///  * 可以添加**自定义线路**，它要出现在线路列表里，启动时也能看到
-///  * 可以**固定一条线路**，之后启动直接跳过启动页
 class HostStore extends ChangeNotifier {
   HostStore._();
   static final HostStore instance = HostStore._();
@@ -56,18 +47,10 @@ class HostStore extends ChangeNotifier {
 
   final List<CustomHost> _custom = [];
 
-  /// 是否启动时跳过启动页。
-  ///
-  /// 开启后直接用「上次进入所用的线路」连接（AppState.apiHost），
-  /// 不需要单独「固定线路」—— 少一个概念、少一处不一致。
   bool skipStartup = false;
 
   List<CustomHost> get customHosts => List.unmodifiable(_custom);
 
-  /// 供启动页/设置页统一使用的线路表：内置 + 服务器 + 自定义。
-  ///
-  /// 返回 `[host, label]` 形式，与 JmApi.hosts 结构一致，
-  /// 便于直接合并展示。
   List<List<String>> mergeWith(List<List<String>> base) {
     final out = <List<String>>[];
     final seen = <String>{};
@@ -78,7 +61,6 @@ class HostStore extends ChangeNotifier {
       seen.add(h);
       out.add([h, b.length > 1 ? b[1] : h]);
     }
-    // 自定义线路排在末尾，标注「自定义」
     for (final c in _custom) {
       if (seen.contains(c.host)) continue;
       seen.add(c.host);
@@ -106,7 +88,6 @@ class HostStore extends ChangeNotifier {
   }
 
   Future<void> addCustom(CustomHost h) async {
-    // 规范化：去掉协议与末尾斜杠，只存主机名
     var host = h.host.trim();
     host = host.replaceFirst(RegExp(r'^https?://'), '');
     host = host.split('/').first;

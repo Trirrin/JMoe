@@ -23,8 +23,6 @@ import 'core/temp_store.dart';
 import 'pages/startup_host_page.dart';
 import 'pages/main_page.dart';
 
-/// 应用引导状态机：
-///   splash → hostPick（测速/选线）→ main
 class AppBootstrap extends StatefulWidget {
   const AppBootstrap({super.key});
 
@@ -38,8 +36,6 @@ class _AppBootstrapState extends State<AppBootstrap> {
   @override
   void initState() {
     super.initState();
-    // 全局透明状态栏。图标明暗由各页面的 AppBar / AnnotatedRegion 决定，
-    // 这里只兜底初始值（浅色主题 → 深色图标），避免启动页图标看不见。
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
@@ -55,7 +51,6 @@ class _AppBootstrapState extends State<AppBootstrap> {
   }
 
   Future<void> _onEnterMain() async {
-    // 进入主界面前补齐设置（不阻塞首帧）
     unawaited(_postInit());
     setState(() => _ready = true);
   }
@@ -67,8 +62,6 @@ class _AppBootstrapState extends State<AppBootstrap> {
           .loadSettings(imgShunt: state.imageShunt)
           .timeout(const Duration(seconds: 12));
     } catch (_) {}
-    // 校验本地会话是否还有效：token 过期时界面会显示「已登录」但
-    // 收藏/历史全空，用户完全看不出发生了什么。这里主动探一次。
     if (state.loggedIn) {
       unawaited(_verifyLogin());
     }
@@ -77,10 +70,9 @@ class _AppBootstrapState extends State<AppBootstrap> {
     } catch (_) {}
   }
 
-  /// 会话失效则清理本地凭据，下次进书架会引导重新登录。
   Future<void> _verifyLogin() async {
     final valid = await JmService.instance.verifySession();
-    if (valid != false) return; // true / null（网络问题）都不动会话
+    if (valid != false) return;
     final state = AppState.instance;
     await state.saveSession(null, null);
     JmApi.instance.jwtToken = null;
@@ -101,7 +93,6 @@ void main() async {
   await L.load();
   await AppState.instance.init();
   await ReaderSettings.instance.load();
-  // 让阅读器主题跟随 App 的深浅色设置（而非系统设置）
   ReaderSettings.appThemeMode = () => switch (AppState.instance.themeMode) {
         ThemeMode.dark => 'dark',
         ThemeMode.light => 'light',
@@ -109,16 +100,11 @@ void main() async {
       };
   await ReadingStats.instance.load();
   await SubscriptionStore.instance.load();
-  // 关注作者的作品更新基线（用于「订阅该作者全部更新」）
   SubscriptionStore.instance.loadAuthorBaselines();
   await CollectStore.instance.load();
   await HostStore.instance.load();
-  // 订阅更新检查（每 6 小时一次，发现新章发系统通知）
   SubscriptionChecker.instance.start();
-  // 恢复已下载记录（扫描磁盘上的 meta.json，重启后仍可见）
   await ChapterDownloader.restoreFromDisk();
-  // 清理上个进程遗留的大章节临时目录（引用计数已随进程丢失，
-  // 留着只会占空间；请看门狗说明见 TempStore.sweepOnStartup）
   unawaited(TempStore.instance.sweepOnStartup());
   runApp(const JmoeApp());
 }
@@ -151,12 +137,9 @@ class _JmoeAppState extends State<JmoeApp> {
   Widget build(BuildContext context) {
     final state = AppState.instance;
     return MaterialApp(
-      // 语言变化时用 key 强制重建整棵树，确保所有页面文案立即同步，
-      // 而不是等到用户操作某个控件触发局部重绘才更新。
       key: ValueKey('app_${state.uiLang}'),
       title: 'JMoe',
       debugShowCheckedModeBanner: false,
-      // 系统组件（复制/粘贴/全选等）跟随中文，不再显示英文
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -179,9 +162,6 @@ class _JmoeAppState extends State<JmoeApp> {
         oled: state.oledMode,
       ),
       themeMode: state.themeMode,
-      // 统一由根节点控制状态栏/导航栏图标明暗：
-      // 浅色主题 → 深色图标，深色主题 → 浅色图标。
-      // 这样启动页与主界面表现一致，不会出现「启动页任务栏不变色」。
       builder: (context, child) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return AnnotatedRegion<SystemUiOverlayStyle>(

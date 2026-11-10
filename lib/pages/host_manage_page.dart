@@ -8,7 +8,6 @@ import '../core/jm_protocol.dart';
 import '../core/jm_service.dart';
 import '../core/l10n.dart';
 
-/// 线路管理页：API 线路 + 图片线路统一管理，支持测速、切换、显示延迟。
 class HostManagePage extends StatefulWidget {
   const HostManagePage({super.key});
 
@@ -16,11 +15,10 @@ class HostManagePage extends StatefulWidget {
   State<HostManagePage> createState() => _HostManagePageState();
 }
 
-/// 单条线路状态。
 class _HostItem {
   final String host;
   final String label;
-  final int order; // 固定编号，永不随测速变化
+  final int order;
   int? latency;
 
   _HostItem({
@@ -40,16 +38,12 @@ class _HostManagePageState extends State<HostManagePage> {
   bool _testing = false;
   bool _applying = false;
   bool _loading = true;
-  /// 当前已生效的线路
   String _activeHost = '';
 
-  /// 已选中但尚未应用的线路（测速后自动指向最优）
   String _pendingHost = '';
 
-  /// 已选中但尚未应用的图片线路
   String _pendingImgHost = '';
 
-  /// 当前生效的图片线路
   String _activeImgHost = '';
 
   @override
@@ -69,7 +63,6 @@ class _HostManagePageState extends State<HostManagePage> {
       if (_pendingHost.isEmpty) _pendingHost = _api.host;
       _activeImgHost = JmService.instance.imgHost ?? '';
       if (_pendingImgHost.isEmpty) _pendingImgHost = _activeImgHost;
-      // 合并自定义线路：用户添加的要出现在这个列表里
       final merged = HostStore.instance.mergeWith(_api.hosts);
       _items
         ..clear()
@@ -84,7 +77,6 @@ class _HostManagePageState extends State<HostManagePage> {
               order: i + 1,
             ),
         ]);
-      // 图片线路：来自 imgHostCandidates
       _imgItems
         ..clear()
         ..addAll([
@@ -97,7 +89,6 @@ class _HostManagePageState extends State<HostManagePage> {
         ]);
       _loading = false;
     });
-    // 进入即自动测速一次
     _test(all: true);
   }
 
@@ -105,14 +96,12 @@ class _HostManagePageState extends State<HostManagePage> {
     if (_testing) return;
     setState(() => _testing = true);
     await Future.wait([
-      // API 线路测速
       for (final it in _items)
         () async {
           final ms = await _api.measure(it.host);
           if (!mounted) return;
           setState(() => it.latency = ms);
         }(),
-      // 图片线路测速
       for (final it in _imgItems)
         () async {
           final ms = await JmService.instance.measureImgHost(it.host);
@@ -123,20 +112,17 @@ class _HostManagePageState extends State<HostManagePage> {
     if (!mounted) return;
     setState(() {
       _testing = false;
-      // 测速完成后自动选中「最优线路」，但需用户点应用才生效
       final okItems = _items.where((e) => e.ok).toList()
         ..sort((a, b) => (a.latency ?? 99999).compareTo(b.latency ?? 99999));
       if (okItems.isNotEmpty) _pendingHost = okItems.first.host;
     });
   }
 
-  /// 是否存在未应用的变更（决定「应用」按钮是否可用）。
   bool get _hasPendingChange =>
       _pendingHost.isNotEmpty && _pendingHost != _activeHost ||
       _pendingImgHost.isNotEmpty &&
           _pendingImgHost != _activeImgHost;
 
-  /// 点击线路：只改变选中项，不立即切换。
   void _select(_HostItem it) {
     if (!it.ok) {
       _toast(L.tp('hostUnavailable', {'host': it.host}));
@@ -145,7 +131,6 @@ class _HostManagePageState extends State<HostManagePage> {
     setState(() => _pendingHost = it.host);
   }
 
-  /// 应用选中的线路（底部按钮触发）：同时应用 API 与图片线路。
   Future<void> _apply() async {
     if (!_hasPendingChange) {
       _toast(L.t('hostAlreadyActive'));
@@ -155,7 +140,6 @@ class _HostManagePageState extends State<HostManagePage> {
 
     var ok = true;
 
-    // 1) API 线路变更
     if (_pendingHost.isNotEmpty && _pendingHost != _activeHost) {
       final switched = await _api.switchHost(_pendingHost);
       if (!mounted) return;
@@ -173,7 +157,6 @@ class _HostManagePageState extends State<HostManagePage> {
       }
     }
 
-    // 2) 图片线路变更
     if (_pendingImgHost.isNotEmpty && _pendingImgHost != _activeImgHost) {
       JmService.instance.setImgHost(_pendingImgHost);
       await AppState.instance.setImgHost(_pendingImgHost);
@@ -198,7 +181,6 @@ class _HostManagePageState extends State<HostManagePage> {
     );
   }
 
-  /// 添加自定义线路：输入主机名（可带 https://，会自动去掉）。
   Future<void> _showAddHostDialog() async {
     final hostCtrl = TextEditingController();
     final labelCtrl = TextEditingController();
@@ -284,10 +266,6 @@ class _HostManagePageState extends State<HostManagePage> {
                   child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
               children: [
-                // ---- 跳过启动页（独立开关，不绑定具体线路）----
-                //
-                // 开启后启动时直接用「上次进入所用的线路」连接，
-                // 连不通会自动回落到启动页。所以不需要再单独「固定线路」。
                 Container(
                   decoration: BoxDecoration(
                     color: scheme.surfaceContainerLow,
@@ -330,7 +308,6 @@ class _HostManagePageState extends State<HostManagePage> {
                 const SizedBox(height: 10),
                 ..._items.map((it) => _hostTile(theme, it)),
                 const SizedBox(height: 8),
-                // 添加自定义线路
                 OutlinedButton.icon(
                   onPressed: _showAddHostDialog,
                   icon: const Icon(Icons.add_link_rounded, size: 18),
@@ -339,7 +316,6 @@ class _HostManagePageState extends State<HostManagePage> {
                     minimumSize: const Size(double.infinity, 44),
                   ),
                 ),
-                // 已添加的自定义线路（可删除）
                 if (HostStore.instance.customHosts.isNotEmpty) ...[
                   const SizedBox(height: 10),
                   Padding(
@@ -411,7 +387,6 @@ class _HostManagePageState extends State<HostManagePage> {
               ],
                   ),
                 ),
-                // 底部：应用按钮
                 SafeArea(
                   top: false,
                   child: Padding(
@@ -460,7 +435,6 @@ class _HostManagePageState extends State<HostManagePage> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              // 固定编号（不随测速重排）
               Container(
                 width: 32,
                 height: 32,
@@ -539,7 +513,6 @@ class _HostManagePageState extends State<HostManagePage> {
 
   Widget _imgTile(ThemeData theme, _HostItem it) {
     final scheme = theme.colorScheme;
-    // 选中态看 pending，生效态看 active —— 与 API 线路一致
     final active = _pendingImgHost == it.host;
     final isCurrent = _activeImgHost == it.host;
     return Card(
@@ -555,7 +528,6 @@ class _HostManagePageState extends State<HostManagePage> {
             _toast(L.tp('hostUnavailable', {'host': it.host}));
             return;
           }
-          // 只改选中项，等用户点「应用」才真正生效
           setState(() => _pendingImgHost = it.host);
         },
         child: Padding(

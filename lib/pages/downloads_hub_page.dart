@@ -4,20 +4,9 @@ import '../core/l10n.dart';
 import 'downloads_page.dart';
 import 'imported_page.dart';
 
-/// 「下载」页：把原来的「我的下载」与「我导入」合并到一个页面。
-///
-/// 两个功能本质是同一件事的两端：
-///  * **下载**：App 自己下载保存的内容
-///  * **导入**：外部放进来的 `.jmoe` 包
-/// 用户管理「本地内容」时不应该在两个入口之间来回切换，
-/// 所以合并成一个页面、用两个 Tab 区分。
-///
-/// 布局：Tab 栏右侧直接放排序/清空按钮（不再单独占一行，
-/// 避免把内容整体往下推）。
 class DownloadsHubPage extends StatefulWidget {
   const DownloadsHubPage({super.key, this.initialTab = 0});
 
-  /// 0 = 下载，1 = 导入
   final int initialTab;
 
   @override
@@ -32,7 +21,6 @@ class _DownloadsHubPageState extends State<DownloadsHubPage>
     initialIndex: widget.initialTab.clamp(0, 1),
   );
 
-  /// 用来把「排序 / 清空」这两个动作转发给内嵌的下载页
   final _downloadsKey = GlobalKey<DownloadsPageState>();
 
   @override
@@ -48,7 +36,6 @@ class _DownloadsHubPageState extends State<DownloadsHubPage>
       appBar: AppBar(
         title: Text(L.t('myDownloads')),
         actions: [
-          // 只在「下载」Tab 显示排序/清空（导入 Tab 没有这些概念）
           AnimatedBuilder(
             animation: _tab,
             builder: (context, _) {

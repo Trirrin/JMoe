@@ -2,9 +2,6 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
-/// 轻量日志：把异常/关键事件写到文件，便于用户反馈时排查。
-///
-/// 只保留最近 [maxLines] 行，避免无限增长。
 class AppLog {
   AppLog._();
   static final AppLog instance = AppLog._();
@@ -23,7 +20,6 @@ class AppLog {
     return _file!;
   }
 
-  /// 记录一条日志。
   Future<void> log(String tag, Object? message, [Object? error]) async {
     final ts = DateTime.now().toIso8601String();
     final line = '[$ts] [$tag] $message'
@@ -42,7 +38,6 @@ class AppLog {
     } catch (_) {}
   }
 
-  /// 记录异常。
   Future<void> error(String tag, Object e, [StackTrace? st]) =>
       log(tag, e, st == null ? null : st.toString().split('\n').take(3).join(' / '));
 
@@ -55,7 +50,6 @@ class AppLog {
     } catch (_) {}
   }
 
-  /// 读取全部日志（供导出/展示）。
   Future<String> read() async {
     try {
       final f = await _ensure();
@@ -66,7 +60,6 @@ class AppLog {
     }
   }
 
-  /// 清空日志。
   Future<void> clear() async {
     try {
       final f = await _ensure();

@@ -9,31 +9,20 @@ import 'app_log.dart';
 import 'app_state.dart';
 import 'l10n.dart';
 
-/// e-hentai.org 数据源适配。
-///
-/// 通过解析站点 HTML 实现（与浏览同一份页面），
-/// 图页需要顺序取 `img#img` 的 `src`，缩略图使用雪碧图切片信息。
 class EHentaiService {
   EHentaiService._();
   static final EHentaiService instance = EHentaiService._();
 
-  /// 主域名 + 备用镜像（部分网络下主域不可达）
-  /// 可用域名列表（主域 + 社区常用反代）。
-  ///
-  /// 注意：EH 在部分地区不可直连，必须靠反代。
-  /// 这里放多个候选，首次请求时自动挑选可用的那个。
   static const List<String> _mirrorList = [
     'https://e-hentai.org',
-    'https://e-hentai.org',      // 占位，去重后无影响
+    'https://e-hentai.org',
     'https://upup.li',
     'https://exhentai.org',
     'https://e-hentai.exh-entai.org',
   ];
 
-  /// 上次成功的域名，后续优先使用
   static String _base = 'https://e-hentai.org';
 
-  /// 当前使用的域名
   String get base => _base;
 
   final Dio _dio = Dio(
@@ -50,10 +39,8 @@ class EHentaiService {
     ),
   );
 
-  /// 站点 Cookie（登录态）。
   String? cookie;
 
-  /// 把某个域名替换为候选域名
   String _swapBase(String url, String newBase) {
     for (final m in _mirrorList) {
       if (url.startsWith(m)) return newBase + url.substring(m.length);
@@ -61,34 +48,28 @@ class EHentaiService {
     return url;
   }
 
-  /// 带镜像回退的抓取：当前域名失败后依次尝试其他镜像。
-  /// 最近一次抓取失败的原因（供 UI 展示）
   String? lastError;
 
   Future<String?> _getHtmlWithFallback(String url) async {
-    // 先试当前域名
     final first = await _getHtml(url);
     if (first != null && first.isNotEmpty) return first;
 
-    // 依次尝试其他镜像
     for (final m in _mirrorList) {
       if (m == _base) continue;
       final swapped = _swapBase(url, m);
       if (swapped == url) continue;
       final r = await _getHtml(swapped);
       if (r != null && r.isNotEmpty) {
-        _base = m; // 记住可用域名
+        _base = m;
         lastError = null;
         return r;
       }
     }
-    // 全部失败：记录原因，供界面提示
     lastError = 'unreachable';
     return null;
   }
 
   Future<String?> _getHtml(String url) async {
-    // 离线模式：不发起任何网络请求
     if (AppState.instance.offlineMode) {
       lastError = 'offline';
       return null;
@@ -102,8 +83,6 @@ class EHentaiService {
           maxRedirects: 5,
           validateStatus: (c) => c != null && c < 500,
           headers: {
-            // 关键：EH 对没有 User-Agent 的请求直接返回空页，
-            // 这正是「EH 源空白」的根因。
             'User-Agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                     'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -122,7 +101,6 @@ class EHentaiService {
         unawaited(AppLog.instance.log('EH', 'empty body: $url'));
         return null;
       }
-      // 被拦截时 EH 会返回含「Sad Panda」/「IP blocked」的页面
       if (body.contains('Sad Panda') ||
           body.contains('IP address') && body.contains('blocked')) {
         unawaited(AppLog.instance.log('EH', 'blocked by EH at $url'));
@@ -135,7 +113,6 @@ class EHentaiService {
     }
   }
 
-  /// 抓取图片原始字节（绕过防盗链）。
   Future<Uint8List?> fetchBytes(String url, {String? referer}) async {
     if (AppState.instance.offlineMode) return null;
     try {
@@ -144,7 +121,6 @@ class EHentaiService {
         options: Options(
           responseType: ResponseType.bytes,
           headers: {
-            // EH 图片服务器会校验 UA，缺失会直接拒绝（403/空响应）
             'User-Agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                     'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -170,11 +146,6 @@ class EHentaiService {
     return '$base${url.startsWith('/') ? '' : '/'}$url';
   }
 
-  /// 首页 / 搜索结果 / 分类列表统一解析。
-  ///
-  /// 抓取失败时**抛异常**而不是返回空列表 —— 空列表在 UI 上等价于
-  /// 「这个站没有任何内容」，会显示成一片空白（EH 白屏的观感）。
-  /// 抛异常才能让上层显示「加载失败 + 重试」。
   Future<EHPage> fetchListing(String url) async {
     final html = await _getHtmlWithFallback(url);
     if (html == null) {
@@ -187,17 +158,12 @@ class EHentaiService {
     final doc = html_parser.parse(html);
     final items = <EHItem>[];
 
-    // 新版 EH 列表：每个条目是 <td class="gl3c glname"><a href=...>，
-    // 标题在内部 <div class="glink">。直接遍历 glname 单元格更稳，
-    // 不依赖外层表格的 class（历史上 itg/gtb 变过）。
     var rows = doc.querySelectorAll('td.glname');
     if (rows.isEmpty) {
-      // 兜底：旧结构
       rows = doc.querySelectorAll('table.itg tr');
     }
 
     for (final tr in rows) {
-      // 链接可能直接是 td.gl3c a，也可能在 td 内部
       final link = tr.querySelector('a[href*="/g/"]') ??
           tr.querySelector('td.gl3c a');
       if (link == null) continue;
@@ -206,7 +172,6 @@ class EHentaiService {
       final title = titleEl?.text.trim() ?? link.text.trim();
       if (title.isEmpty) continue;
 
-      // 封面：gl1c 内 div.glthumb img 的 data-src / src，或雪碧图背景
       String cover = '';
       final thumbImg = tr.querySelector('div.glthumb img');
       if (thumbImg != null) {
@@ -309,7 +274,6 @@ class EHentaiService {
     final favText = doc.querySelector('#favcount')?.text ?? '';
     final favMatch = RegExp(r'(\d+)').firstMatch(favText);
 
-    // 缩略图页：每页的 /s/<key>/<gid>-<index> 链接
     final pageLinks = <String>[];
     final thumbs = doc.querySelectorAll('#gdt a');
     for (final a in thumbs) {
@@ -317,7 +281,6 @@ class EHentaiService {
       if (href != null && href.contains('/s/')) pageLinks.add(_abs(href));
     }
 
-    // 分页：每页 20/40 张缩略图，页面里 .ptt td a 提供后续缩略图页地址
     final thumbPages = <String>[];
     for (final a in doc.querySelectorAll('.ptt a')) {
       final href = a.attributes['href'];
@@ -327,7 +290,6 @@ class EHentaiService {
 
     String? firstPageUrl = pageLinks.isNotEmpty ? pageLinks.first : null;
 
-    // 若是多缩略图页，需要再抓取后续页拿到所有 /s/ 链接
     final allLinks = <String>[...pageLinks];
     if (thumbPages.length > 1) {
       for (final tp in thumbPages) {
@@ -341,7 +303,6 @@ class EHentaiService {
           if (!allLinks.contains(abs)) allLinks.add(abs);
         }
       }
-      // 按 gid-index 排序
       allLinks.sort((a, b) {
         final ai = int.tryParse(RegExp(r'-(\d+)$').firstMatch(a)?.group(1) ?? '0') ?? 0;
         final bi = int.tryParse(RegExp(r'-(\d+)$').firstMatch(b)?.group(1) ?? '0') ?? 0;
@@ -371,7 +332,6 @@ class EHentaiService {
     );
   }
 
-  /// 取单页原图地址（`img#img`）。
   Future<String?> fetchImageUrl(String pageUrl) async {
     final html = await _getHtmlWithFallback(pageUrl);
     if (html == null) return null;

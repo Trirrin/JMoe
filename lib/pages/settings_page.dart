@@ -20,7 +20,6 @@ import 'imported_page.dart';
 import 'storage_page.dart';
 import '../core/l10n.dart';
 
-/// 「我的」：账号 + 设置（主题/线路/阅读/关于）。
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -42,7 +41,6 @@ class _SettingsPageState extends State<SettingsPage>
       body: SafeArea(
         bottom: false,
         child: ListView(
-          // 保留滚动位置
           key: const PageStorageKey('settings_scroll'),
           padding: const EdgeInsets.only(bottom: 32),
           children: [
@@ -63,8 +61,6 @@ class _SettingsPageState extends State<SettingsPage>
             _buildBackgroundTile(theme, state),
             SectionHeader(title: L.t('reading')),
             _buildReaderModeTile(theme, state),
-            // 音量键翻页只有 Android 支持（iOS / 鸿蒙不允许拦截硬件键）。
-            // 不支持的平台**整块隐藏** —— 用户不该看到点了没反应的开关。
             if (PlatformCaps.supportsVolumeKeyPaging)
               _buildVolumeKeyTile(theme, state),
             _buildStartTabTile(theme, state),
@@ -92,13 +88,10 @@ class _SettingsPageState extends State<SettingsPage>
                 }),
               ),
               trailing: const Icon(Icons.chevron_right, size: 18),
-              // 独立页面（不再是系统 AboutDialog）：
-              // 可以放项目主页、反馈、鸣谢等完整信息
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const AboutPage()),
               ),
             ),
-            // 「清除所有数据」统一放在「存储管理」里，设置页不再重复入口
           ],
         ),
       ),
@@ -266,10 +259,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 跳过启动页（独立开关，随时可开/关）
-  ///
-  /// 开启后启动时不再显示线路页，直接用**上次进入所用的线路**连接。
-  /// 线路连不通会自动回落到启动页，不会把用户卡在门外。
   Widget _buildSkipStartupTile(ThemeData theme, AppState state) {
     return SwitchListTile(
       secondary: const Icon(Icons.fast_forward_rounded),
@@ -286,7 +275,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 音量键翻页开关
   Widget _buildVolumeKeyTile(ThemeData theme, AppState state) {
     return SwitchListTile(
       secondary: const Icon(Icons.volume_up_outlined),
@@ -296,7 +284,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 自定义背景图：选图 → 复制到应用私有目录 → 记录路径
   Widget _buildBackgroundTile(ThemeData theme, AppState state) {
     final has = state.customBackground.isNotEmpty;
     return ListTile(
@@ -321,7 +308,6 @@ class _SettingsPageState extends State<SettingsPage>
       onTap: () async {
         final path = await FilePickerChannel.pickFile();
         if (path == null || !mounted) return;
-        // 复制到应用私有目录：原图可能被用户在相册里删掉/移动
         try {
           final base = await getApplicationDocumentsDirectory();
           final dir = Directory('${base.path}/JMoe/bg');
@@ -356,8 +342,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-
-  /// 启动默认页。
   Widget _buildStartTabTile(ThemeData theme, AppState state) {
     return ListTile(
       leading: const Icon(Icons.start_rounded),
@@ -384,7 +368,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 首页海报自动轮播。
   Widget _buildBannerTile(ThemeData theme, AppState state) {
     return SwitchListTile(
       secondary: const Icon(Icons.slideshow_outlined),
@@ -398,7 +381,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 网络限速（Mbps）。
   Widget _buildNetLimitTile(ThemeData theme, AppState state) {
     return ListTile(
       leading: const Icon(Icons.speed_rounded),
@@ -439,7 +421,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 列表卡片大小。
   Widget _buildCardSizeTile(ThemeData theme, AppState state) {
     return ListTile(
       leading: const Icon(Icons.grid_view_rounded),
@@ -466,7 +447,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 阅读时自动预取下一章。
   Widget _buildPrefetchTile(ThemeData theme, AppState state) {
     return SwitchListTile(
       secondary: const Icon(Icons.auto_awesome_motion_outlined),
@@ -480,7 +460,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 缩略图质量。
   Widget _buildImageQualityTile(ThemeData theme, AppState state) {
     return ListTile(
       leading: const Icon(Icons.high_quality_outlined),
@@ -516,7 +495,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 启动页是否自动进入。
   Widget _buildAutoEnterTile(ThemeData theme, AppState state) {
     return SwitchListTile(
       secondary: const Icon(Icons.login_rounded),
@@ -530,7 +508,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 删除操作二次确认。
   Widget _buildConfirmDeleteTile(ThemeData theme, AppState state) {
     return SwitchListTile(
       secondary: const Icon(Icons.verified_user_outlined),
@@ -559,10 +536,7 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 统一「语言」入口 → 语言管理页（界面语言 + 内容语言）。
   Widget _buildLanguageEntry(ThemeData theme, AppState state) {
-    // 副标题只显示该语言的**自称**（简体中文 / 繁體中文 / English）。
-    // 之前是 `zh-Hans · CN` 这种内部代码，用户根本看不懂。
     final uiName = switch (state.uiLang) {
       'en' => 'English',
       'zh-Hant' => '繁體中文',
@@ -579,7 +553,6 @@ class _SettingsPageState extends State<SettingsPage>
       leading: const Icon(Icons.translate),
       title: Text(L.t('languageManage')),
       subtitle: Text(
-        // 界面语言与内容语言一致时只写一个，避免「简体中文 · 简体中文」
         uiName == contentName ? uiName : '$uiName · $contentName',
         style: const TextStyle(fontSize: 11.5),
       ),
@@ -593,8 +566,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 缓存管理入口。
-  /// 存储管理入口：占用饼图 + 分类清理 + 配置导入导出。
   Widget _buildStorageEntry(ThemeData theme, AppState state) {
     return ListTile(
       leading: const Icon(Icons.pie_chart_outline_rounded),
@@ -610,5 +581,3 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 }
-
-

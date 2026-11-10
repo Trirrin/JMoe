@@ -6,13 +6,6 @@ import '../core/app_theme.dart';
 import '../core/l10n.dart';
 import '../widgets/app_logo.dart';
 
-/// 「关于」独立页面（参照 Kazumi 的信息组织方式）。
-///
-/// Kazumi 的关于页结构：
-///  * 顶部：应用图标 + 名称 + 版本号（居中）
-///  * 简介段落
-///  * 若干「条目行」：项目主页 / 问题反馈 / 开源许可 / 特别鸣谢
-///  * 底部：版权与免责声明
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
@@ -63,11 +56,9 @@ class AboutPage extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 32),
         children: [
           const SizedBox(height: 24),
-          // ---- 顶部：图标 + 名称 + 版本 ----
           Center(
             child: Column(
               children: [
-                // 应用图标（与桌面图标同源，不是通用书籍图标）
                 const AppLogo(size: 84),
                 const SizedBox(height: 14),
                 Text(
@@ -92,7 +83,6 @@ class AboutPage extends StatelessWidget {
           ),
           const SizedBox(height: 24),
 
-          // ---- 简介 ----
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text(
@@ -107,7 +97,6 @@ class AboutPage extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // ---- 条目 ----
           Container(
             margin: const EdgeInsets.symmetric(
               horizontal: AppStyle.pagePadding,
@@ -166,7 +155,6 @@ class AboutPage extends StatelessWidget {
           ),
           const SizedBox(height: 18),
 
-          // ---- 特别鸣谢 ----
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: Text(
@@ -211,7 +199,6 @@ class AboutPage extends StatelessWidget {
           ),
           const SizedBox(height: 22),
 
-          // ---- 免责声明 ----
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text(

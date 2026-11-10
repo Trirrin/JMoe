@@ -9,25 +9,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'image_cache.dart';
 import 'temp_store.dart';
 
-/// 缓存治理：容量上限、保留时长、按章节/全部清理。
-///
-/// 与 `ImageCacheManager`（加密图片缓存）配合：
-///  * 每次写入后触发配额检查（LRU 淘汰最旧文件）
-///  * 启动时清理超过保留时间的文件
-///  * 支持「清理全部」「仅清理过期」「按章节清理」
 class CacheManager {
   CacheManager._();
   static final CacheManager instance = CacheManager._();
 
   SharedPreferences? _prefs;
 
-  /// 最大缓存（MB），0 表示不限制
   int maxSizeMb = 1024;
 
-  /// 保留天数，0 表示永久
   int retentionDays = 30;
 
-  /// 变更通知（设置页刷新用）
   final ValueNotifier<int> revision = ValueNotifier(0);
 
   Future<void> init() async {
@@ -58,7 +49,6 @@ class CacheManager {
     return d;
   }
 
-  /// 当前占用（字节）：图片缓存 + 大章节临时目录。
   Future<int> usedBytes() async {
     final d = await _dir();
     var total = 0;
@@ -75,7 +65,6 @@ class CacheManager {
     return total;
   }
 
-  /// 使用占比统计：已用 / 上限 / 百分比。
   Future<({int used, int cap, double ratio})> usageStats() async {
     final used = await usedBytes();
     final cap = maxSizeMb > 0 ? maxSizeMb * 1024 * 1024 : 0;
@@ -83,7 +72,6 @@ class CacheManager {
     return (used: used, cap: cap, ratio: ratio);
   }
 
-  /// 执行配额与过期清理。
   Future<void> enforce() async {
     try {
       final d = await _dir();
@@ -95,7 +83,6 @@ class CacheManager {
           (a, b) => a.statSync().modified.compareTo(b.statSync().modified),
         );
 
-      // 1) 过期清理
       if (retentionDays > 0) {
         final limit = DateTime.now().subtract(Duration(days: retentionDays));
         for (final f in files) {
@@ -107,7 +94,6 @@ class CacheManager {
         }
       }
 
-      // 2) 容量清理（LRU：最旧的先删）
       if (maxSizeMb > 0) {
         final capBytes = maxSizeMb * 1024 * 1024;
         var total = 0;
@@ -127,46 +113,32 @@ class CacheManager {
         }
       }
       revision.value++;
-      // 临时目录按自己的策略（空闲超时 + 总量上限）独立清扫
       unawaited(TempStore.instance.sweep());
     } catch (_) {}
   }
 
-  /// 清理全部缓存（图片缓存 + 大章节临时目录）。
-  ///
-  /// ⚠️ 只清这两项。**不要**在这里顺带清章节索引：索引只是「哪些章节
-  /// 完整缓存过」的登记表，图片被清掉后由 [reconcileIndex] 自动对账剔除；
-  /// 反过来「删某一章」也绝不能调这里 —— 那会把所有章节和全部图片缓存
-  /// 一起清空，用户只删一本却发现整个缓存都没了。
   Future<void> clearAll() async {
     await ImageCacheManager.instance.clearDisk();
     await TempStore.instance.clearAll();
     revision.value++;
   }
 
-  /// 只清某一章的缓存：该章的图片 + 临时目录 + 索引条目。
-  ///
-  /// 不影响其它章节，也不影响其它图片缓存。
   Future<void> clearChapter(
     String sourceId,
     String chapterId, {
     List<String> imageUrls = const [],
   }) async {
-    // 1) 该章在内存/磁盘上的图片（按已知 URL 精确删除）
     for (final url in imageUrls) {
       await ImageCacheManager.instance.evict(url);
     }
-    // 2) 该章的临时目录
     try {
       final dir = await TempStore.instance.dirFor(sourceId, chapterId);
       await TempStore.instance.remove(dir);
     } catch (_) {}
-    // 3) 索引条目
     await unmarkChapter(sourceId, chapterId);
     revision.value++;
   }
 
-  /// 仅清理过期项。
   Future<int> clearExpired() async {
     final d = await _dir();
     var removed = 0;
@@ -184,9 +156,6 @@ class CacheManager {
     return removed;
   }
 
-  // ---------------- 离线章节索引 ----------------
-
-  /// 已缓存章节索引：key = sourceId:chapterId，value = 元信息
   List<Map<String, dynamic>> _index = [];
 
   Future<void> loadIndex() async {
@@ -209,7 +178,6 @@ class CacheManager {
   bool hasChapter(String sourceId, String chapterId) =>
       _index.any((e) => e['key'] == '$sourceId:$chapterId');
 
-  /// 章节缓存完成后登记（供离线列表与一致性校验）。
   Future<void> markChapter({
     required String sourceId,
     required String comicId,
@@ -218,8 +186,6 @@ class CacheManager {
     required String chapterName,
     String? cover,
     int total = 0,
-    /// 该章的图片 URL 列表：删章时用来精确清掉这几张图的缓存，
-    /// 而不是把整个图片缓存目录清空。
     List<String> imageUrls = const [],
   }) async {
     final key = '$sourceId:$chapterId';
@@ -240,7 +206,6 @@ class CacheManager {
     await _saveIndex();
   }
 
-  /// 删除某章索引（清理该章缓存时调用）。
   Future<void> unmarkChapter(String sourceId, String chapterId) async {
     _index.removeWhere((e) => e['key'] == '$sourceId:$chapterId');
     await _saveIndex();
@@ -251,14 +216,10 @@ class CacheManager {
     revision.value++;
   }
 
-  /// 一致性校验：找出「索引里有但磁盘已不存在」的条目并清理。
-  ///
-  /// 返回被清理的条目数。用于云端收藏/历史与本地缓存对账。
   Future<int> reconcileIndex() async {
     var removed = 0;
     final keep = <Map<String, dynamic>>[];
     for (final e in _index) {
-      // 章节缓存以图片文件存在与否为准：这里用章首页是否存在近似判断
       final ok = await _chapterFilesExist(e);
       if (ok) {
         keep.add(e);
@@ -277,7 +238,6 @@ class CacheManager {
     try {
       final d = await _dir();
       if (!d.existsSync()) return false;
-      // 只要目录里还有文件即认为该章部分/完整存在（粗粒度一致性）
       return d.listSync().isNotEmpty;
     } catch (_) {
       return false;

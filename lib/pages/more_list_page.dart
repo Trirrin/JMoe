@@ -8,17 +8,11 @@ import '../widgets/common_widgets.dart';
 import 'unified_detail_page.dart';
 import '../core/l10n.dart';
 
-/// 通用「查看更多」列表页（JM / EH 共用）。
-///
-/// 加载策略：**一次性连续加载**（边加载边显示），
-/// 加载到 [pauseThreshold] 条时暂停，等用户滚动接近底部再继续，
-/// 避免一次性拉取上千条造成卡顿与耗流量。
 class MoreListPage extends StatefulWidget {
   final ComicSource source;
   final String moreKey;
   final String title;
 
-  /// 单次暂停阈值：加载到这么多条就暂停
   final int pauseThreshold;
 
   const MoreListPage({
@@ -40,7 +34,7 @@ class _MoreListPageState extends State<MoreListPage> {
   int _total = -1;
   bool _fetching = false;
   bool _hasMore = true;
-  bool _paused = false; // 达到阈值暂停
+  bool _paused = false;
   String? _error;
 
   @override
@@ -69,7 +63,6 @@ class _MoreListPageState extends State<MoreListPage> {
     }
   }
 
-  /// 连续加载直到：到达阈值 / 没有更多 / 出错。
   Future<void> _pump() async {
     if (_fetching || _paused || !_hasMore) return;
     _fetching = true;
@@ -94,7 +87,6 @@ class _MoreListPageState extends State<MoreListPage> {
           _page = r.nextPage;
           _hasMore = r.hasMore;
           _error = null;
-          // 达到阈值 → 暂停，等用户滚到底再继续
           if (_items.length >= widget.pauseThreshold) {
             _paused = true;
           }

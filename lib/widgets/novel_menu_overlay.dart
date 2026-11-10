@@ -3,12 +3,6 @@ import 'package:flutter/material.dart';
 import '../core/l10n.dart';
 import '../core/reader_settings.dart';
 
-/// 小说阅读器的菜单覆盖层。
-///
-/// 动画约定：
-/// - 顶栏从上边缘滑入（负向）
-/// - 底部工具栏与进度条从下边缘滑入（正向）
-/// - 收起因均走反向，且带淡入淡出
 class NovelMenuOverlay extends StatefulWidget {
   const NovelMenuOverlay({
     super.key,
@@ -59,12 +53,10 @@ class NovelMenuOverlay extends StatefulWidget {
 }
 
 class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
-  /// 拖动中的临时值（null = 未在拖动，用外部 progress）
   double? _dragValue;
 
   double get progress => _dragValue ?? widget.progress;
 
-  // 转发到 widget，保持下方代码可读
   Animation<double> get animation => widget.animation;
   ReaderTheme get theme => widget.theme;
   String get title => widget.title;
@@ -92,13 +84,11 @@ class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
         color: Colors.black.withValues(alpha: 0.25),
         child: Column(
           children: [
-            // 顶栏：从上方飞入
             _slideIn(
               from: -1,
               child: _topBar(context),
             ),
             const Spacer(),
-            // 底部：进度条 + 工具栏合成一块（共用背景，不再割裂）
             _slideIn(
               from: 1,
               child: _bottomPanel(context),
@@ -109,7 +99,6 @@ class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
     );
   }
 
-  /// 方向化滑入 + 淡入。from = -1 上方，1 下方。
   Widget _slideIn({required double from, required Widget child}) {
     return AnimatedBuilder(
       animation: animation,
@@ -127,7 +116,6 @@ class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
     );
   }
 
-  /// 面板底色：比阅读背景稍作区分，避免深色下融为一体。
   Color get _panelColor {
     final isDark = theme.bg.computeLuminance() < 0.5;
     return isDark
@@ -135,7 +123,6 @@ class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
         : Color.alphaBlend(Colors.black.withValues(alpha: 0.04), theme.bg);
   }
 
-  /// 分隔线颜色
   Color get _dividerColor => theme.subtle.withValues(alpha: 0.28);
 
   Widget _topBar(BuildContext context) {
@@ -185,10 +172,6 @@ class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
     );
   }
 
-
-
-
-  /// 进度条 + 工具栏：同一块面板，视觉上连续。
   Widget _bottomPanel(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     return Container(
@@ -206,7 +189,6 @@ class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 进度条（紧贴工具栏上方，无间隙）
           SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 2,
@@ -220,7 +202,6 @@ class _NovelMenuOverlayState extends State<NovelMenuOverlay> {
               padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
               child: Slider(
                 value: progress.clamp(0.0, 1.0),
-                // 拖动中只更新本地值，避免频繁 setState 造成卡顿
                 onChanged: (v) => setState(() => _dragValue = v),
                 onChangeEnd: (v) {
                   setState(() => _dragValue = null);

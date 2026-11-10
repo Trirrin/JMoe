@@ -4,11 +4,6 @@ import '../core/app_state.dart';
 import '../core/jm_service.dart';
 import '../core/l10n.dart';
 
-/// 性别选择块：自带底色的胶囊。
-///
-/// 主题里 `chipTheme.side = BorderSide.none`，未选中的 ChoiceChip 在
-/// 浅色背景上几乎不可见（用户反馈「性别选项控件没有背景」）。
-/// 这里自绘一个始终有底色的块，选中时换成主色。
 class _GenderChip extends StatelessWidget {
   final String label;
   final bool selected;
@@ -44,11 +39,6 @@ class _GenderChip extends StatelessWidget {
     );
   }
 }
-/// 账号资料编辑页。
-///
-/// 只开放低风险字段：昵称 / 姓名 / 性别 / 生日 / 城市 / 国家 /
-/// 职业 / 公司 / 学校 / 网站 / 简介。
-/// **刻意不支持修改邮箱**——凭据变更应在官方站点完成。
 class ProfileEditPage extends StatefulWidget {
   const ProfileEditPage({super.key});
 
@@ -66,11 +56,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   String? _gender;
   String _uid = '';
 
-  /// 修改密码已移到独立页面（change_password_page.dart），
-  /// 本页不再持有密码字段。
   String? _email;
 
-  /// 可编辑的文本字段：(key, 多行?)
   static const _fields = <({String key, bool multiline})>[
     (key: 'nickName', multiline: false),
     (key: 'firstName', multiline: false),
@@ -118,10 +105,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     }
     final d = await _service.fetchProfile(uid);
     if (!mounted) return;
-    // `useredit/{uid}` 在部分账号上会返回**全空字段**（实测 nickName/
-    // firstName 等全是 ""，但登录响应里 member 明明有值）。
-    // 这时用本地会话的 member 兜底，否则用户看到「编辑资料一片空白」，
-    // 会以为资料丢了。
     final member = AppState.instance.member ?? const <String, dynamic>{};
     Map<String, dynamic> merged;
     if (d == null) {
@@ -135,7 +118,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
           if (local.isNotEmpty && local != 'null') merged[f.key] = local;
         }
       }
-      // gender 同理
       final g = '${merged['gender'] ?? ''}'.trim();
       if (g.isEmpty || g == 'null') {
         final lg = '${member['gender'] ?? ''}'.trim();
@@ -163,7 +145,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     });
     if (_gender != null) fields['gender'] = _gender;
 
-    // 密码不在这里改（已拆到独立的「修改密码」页）
     final r = await _service.saveProfile(_uid, fields);
     if (!mounted) return;
     setState(() => _saving = false);
@@ -179,7 +160,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       ),
     );
     if (r.ok) {
-      // 昵称变了要同步到本地会话
       final nick = fields['nickName'];
       if (nick is String && nick.isNotEmpty) {
         final m = Map<String, dynamic>.from(AppState.instance.member ?? {});
@@ -257,7 +237,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   children: [
-                    // 性别（三选一）
                     Text(
                       L.t('pGender'),
                       style: theme.textTheme.labelMedium?.copyWith(
@@ -281,7 +260,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                       ],
                     ),
                     const SizedBox(height: 14),
-                    // 文本字段
                     for (final f in _fields) ...[
                       TextField(
                         controller: _form[f.key],
@@ -295,9 +273,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                       const SizedBox(height: 12),
                     ],
                     const SizedBox(height: 18),
-                    // 修改密码已拆成独立页面（与「编辑资料」同级入口），
-                    // 不再埋在资料表单底部 —— 混在一起既容易误填，
-                    // 也让人以为「保存资料」会顺带改密码。
                     Text(
                       L.t('emailAddress'),
                       style: theme.textTheme.titleSmall?.copyWith(

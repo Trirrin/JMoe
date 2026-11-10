@@ -6,10 +6,6 @@ import '../widgets/common_widgets.dart';
 import '../core/l10n.dart';
 import 'novel_pages.dart';
 
-/// 小说列表。
-///
-/// 搜索入口已移除：全站统一用发现页的搜索（切到「小说」板块即可）。
-/// 板块内再放一个搜索框只会让用户分不清该用哪个。
 class NovelsPage extends StatefulWidget {
   const NovelsPage({super.key});
 
@@ -78,7 +74,6 @@ class _NovelsPageState extends State<NovelsPage> {
             ? const Center(child: CircularProgressIndicator())
             : _items.isEmpty
                 ? ListView(
-                    // 空态也要可下拉：用 ListView 包一层保证有滚动体
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
                       SizedBox(
@@ -109,10 +104,7 @@ class _NovelsPageState extends State<NovelsPage> {
                               width: 52,
                               height: 70,
                               child: Hero(
-                                // 与详情页封面一致，实现平滑转场
                                 tag: 'novel_${n['id']}',
-                                // 飞行层独立构造：不依赖卡片实例，
-                                // 卡片滚出缓存区也能飞完
                                 flightShuttleBuilder:
                                     (ctx, anim, dir, from, to) {
                                   final t = Curves.easeInOutCubic
@@ -171,5 +163,3 @@ class _NovelsPageState extends State<NovelsPage> {
     );
   }
 }
-
-/// 小说详情 / 章节。

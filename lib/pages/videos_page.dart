@@ -6,7 +6,6 @@ import '../widgets/common_widgets.dart';
 import 'anime_player_page.dart';
 import '../core/l10n.dart';
 
-/// 视频列表。
 class VideosPage extends StatefulWidget {
   const VideosPage({super.key});
 
@@ -79,11 +78,6 @@ class _VideosPageState extends State<VideosPage> {
                     itemBuilder: (context, i) {
                       final v = _items[i];
                       return InkWell(
-                        // 统一用完整的播放器（AnimePlayerPage）：
-                        // 之前这里用的是 VideoPlayerPage —— 一个只有
-                        // 「播放/暂停/±10s」的简化实现，手势、倍速、全屏、
-                        // 断点续播、预缓存全都没有。同一份视频点进来
-                        // 功能却不一样，用户自然会觉得「割裂」。
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) => AnimePlayerPage(

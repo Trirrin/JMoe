@@ -4,27 +4,6 @@ import 'dart:isolate';
 
 import 'jmoe_archive.dart';
 
-/// 打包 worker：把「逐页 AES 加密 + 写文件」放到**后台 isolate**。
-///
-/// # 为什么需要它
-///
-/// 打包 `.jmoe` 要对每一页做 AES-256-CBC 加密。几百页的章节里，
-/// 这串同步加密会长时间占住主 isolate，UI 直接定格 ——
-/// 用户点「打包分享」时整个界面卡死就是这个原因。
-///
-/// 加密是纯计算、不碰 UI 和平台通道，天然可以搬到后台。
-///
-/// # 为什么不用 compute()
-///
-/// `compute()` 每次调用**新建并销毁一个 isolate**。打包可能连续进行
-/// 多次（批量分享），反复创建 isolate 的开销比省下的还多。
-/// 这里用**常驻 worker**：一个 isolate 常驻，任务排队处理，
-/// 空闲 30 秒后才自动退出。
-///
-/// # 进度回传
-///
-/// worker 通过 SendPort 回传 `{id, done, total}`，主 isolate 收到后
-/// 回调给 UI 刷新进度 —— 界面不再定格，还能看到真实进度。
 class PackWorker {
   PackWorker._();
   static final PackWorker instance = PackWorker._();
@@ -97,7 +76,6 @@ class PackWorker {
     _toWorker = null;
   }
 
-  /// 在后台打包一个章节目录。
   Future<File?> pack({
     required String chapterDir,
     required String chapterId,

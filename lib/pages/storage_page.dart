@@ -10,7 +10,6 @@ import '../core/l10n.dart';
 import '../core/storage_manager.dart';
 import '../main.dart';
 
-/// 存储管理页：占用饼图 + 分类明细 + 逐项清理 + 配置导入导出。
 class StoragePage extends StatefulWidget {
   const StoragePage({super.key});
 
@@ -24,11 +23,11 @@ class _StoragePageState extends State<StoragePage> {
   int _total = 0;
 
   static const List<Color> _palette = [
-    Color(0xFF4CAF50), // 图片
-    Color(0xFF2196F3), // 漫画章节
-    Color(0xFFFF9800), // 小说
-    Color(0xFF9C27B0), // 视频
-    Color(0xFF9E9E9E), // 配置
+    Color(0xFF4CAF50),
+    Color(0xFF2196F3),
+    Color(0xFFFF9800),
+    Color(0xFF9C27B0),
+    Color(0xFF9E9E9E),
   ];
 
   @override
@@ -66,20 +65,17 @@ class _StoragePageState extends State<StoragePage> {
 
     return Scaffold(
       appBar: AppBar(
-        // 刷新按钮已移除：本页支持下拉刷新，再放一个按钮是重复入口
         title: Text(L.t('storageManage')),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _refresh,
-              // 扣除状态栏高度：刷新图标从状态栏下方出现
               edgeOffset: MediaQuery.of(context).padding.top,
               child: ListView(
             physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
-                  // ---- 饼图 ----
                   Center(
                     child: SizedBox(
                       width: 200,
@@ -95,7 +91,6 @@ class _StoragePageState extends State<StoragePage> {
                                 _slices.length,
                                 (i) => _colorOf(i),
                               ),
-                              // 用主题 surface 做中心挖空，深色模式下才不会突兀
                               holeColor: scheme.surface,
                               trackColor:
                                   scheme.surfaceContainerHighest,
@@ -125,7 +120,6 @@ class _StoragePageState extends State<StoragePage> {
                   ),
                   const SizedBox(height: 20),
 
-                  // ---- 图例 + 明细 ----
                   ...List.generate(_slices.length, (i) {
                     final s = _slices[i];
                     final pct = _total <= 0 ? 0.0 : s.bytes / _total;
@@ -228,7 +222,6 @@ class _StoragePageState extends State<StoragePage> {
                     ),
                   ),
 
-                  // ---- 缓存策略：上限 + 保留时长 ----
                   Text(
                     L.t('cachePolicy'),
                     style: theme.textTheme.titleSmall?.copyWith(
@@ -314,8 +307,6 @@ class _StoragePageState extends State<StoragePage> {
     );
   }
 
-
-  /// 选择缓存上限。
   Future<void> _pickMaxSize() async {
     const options = [0, 256, 512, 1024, 2048, 4096];
     final cm = CacheManager.instance;
@@ -343,7 +334,6 @@ class _StoragePageState extends State<StoragePage> {
     }
   }
 
-  /// 选择缓存保留时长。
   Future<void> _pickRetention() async {
     const options = [0, 7, 15, 30, 60, 180];
     final cm = CacheManager.instance;
@@ -396,18 +386,6 @@ class _StoragePageState extends State<StoragePage> {
     await _refresh();
   }
 
-
-  /// 清除所有本地数据：缓存 + 收藏 + 历史 + 书签/批注 + 阅读进度。
-  /// 保留登录状态与界面设置。
-  /// 清除所有数据：**彻底清空**。
-  ///
-  /// 包含：
-  /// - 所有缓存（图片 / 漫画章节 / 小说 / 视频）
-  /// - 登录状态（jwt / member）
-  /// - 界面设置（主题、语言、卡片大小、所有开关…）
-  /// - 阅读统计、书签、批注、收藏、历史、搜索记录
-  ///
-  /// 完成后重启到启动页，确保内存中的旧状态也被丢弃。
   Future<void> _confirmClearAllData() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -433,25 +411,21 @@ class _StoragePageState extends State<StoragePage> {
 
     setState(() => _loading = true);
 
-    // 1) 清空所有缓存目录
     try {
       await StorageManager.instance.clearAll();
     } catch (_) {}
 
-    // 2) 清空全部持久化数据（含登录与界面设置）
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.clear();
     } catch (_) {}
 
-    // 3) 清空运行时状态（内存中的登录态 / 列表）
     try {
       await AppState.instance.clearAllData();
     } catch (_) {}
 
     if (!mounted) return;
 
-    // 4) 重启到启动页：用根 Navigator 重置整个栈，丢弃所有内存状态
     Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const AppBootstrap()),
       (route) => false,
@@ -541,15 +515,12 @@ class _StoragePageState extends State<StoragePage> {
   }
 }
 
-/// 饼图绘制。
 class _PiePainter extends CustomPainter {
   final List<int> values;
   final List<Color> colors;
 
-  /// 中心挖空色（跟随主题，深色模式下不会出现白洞）
   final Color holeColor;
 
-  /// 无数据时的底环色
   final Color trackColor;
 
   _PiePainter({
@@ -566,7 +537,6 @@ class _PiePainter extends CustomPainter {
     final center = rect.center;
     final radius = math.min(size.width, size.height) / 2;
 
-    // 底环（无数据时的占位）
     canvas.drawCircle(
       center,
       radius,
@@ -590,7 +560,6 @@ class _PiePainter extends CustomPainter {
       start += sweep;
     }
 
-    // 中心挖空 → 甜甜圈（用主题色，深色模式自适应）
     canvas.drawCircle(
       center,
       radius * 0.58,
