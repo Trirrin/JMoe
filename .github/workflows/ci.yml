@@ -44,7 +44,7 @@ env:
   FLUTTER_OHOS_REPO: 'https://gitcode.com/CPF-Flutter/flutter_flutter.git'
   FLUTTER_OHOS_BRANCH: 'oh-3.47.7-dev'
   # HarmonyOS 命令行工具版本（留空 = 用 setup-ohos 的最新版）
-  OHOS_CLI_VERSION: 'latest'
+  OHOS_CLI_VERSION: '26.0.0.821'
 
 jobs:
   # ---------------------------------------------------------------- 分析/测试
