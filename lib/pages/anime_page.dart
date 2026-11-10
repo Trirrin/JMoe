@@ -156,9 +156,8 @@ class _AnimePageState extends State<AnimePage> {
                       icon: Icons.movie_outlined,
                     )
                   : GridView.builder(
-                      controller: _scroll,
+                      cacheExtent: 1200, controller: _scroll,
                       padding: const EdgeInsets.all(AppStyle.pagePadding),
-                      cacheExtent: 1200,
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,

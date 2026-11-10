@@ -1,0 +1,69 @@
+name: Build iOS
+
+on:
+  workflow_call:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.9'
+          channel: stable
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache/hosted
+            ~/.pub-cache/git
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Cache pods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+          key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile', 'pubspec.lock') }}
+          restore-keys: pods-${{ runner.os }}-
+
+      - name: Cache ios build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .dart_tool
+            build
+          key: ios-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'lib/**', 'ios/**') }}
+          restore-keys: ios-${{ runner.os }}-
+
+      - run: flutter pub get
+
+      - name: Pod install
+        run: |
+          cd ios
+          pod install --repo-update || pod install
+
+      - run: flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        run: |
+          APP="build/ios/iphoneos/Runner.app"
+          test -d "$APP"
+          mkdir -p build/ios/ipa/Payload
+          cp -R "$APP" build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -qry JMoe-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jmoe-ios
+          path: build/ios/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 7

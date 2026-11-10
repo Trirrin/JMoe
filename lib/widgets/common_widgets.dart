@@ -342,7 +342,7 @@ class SectionHeader extends StatelessWidget {
               ),
             ),
           ),
-          if (trailing != null) trailing!,
+          ?trailing,
           if (actionLabel != null)
             Material(
               color: theme.colorScheme.surfaceContainerHighest,
@@ -522,8 +522,7 @@ class ComicGrid extends StatelessWidget {
     final cols = crossAxisCount ?? densityCols;
 
     return GridView.builder(
-      padding: padding,
-      cacheExtent: 1200,
+      cacheExtent: 1200, padding: padding,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: cols,
         mainAxisSpacing: vGap,

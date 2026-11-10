@@ -158,7 +158,7 @@ class ChapterCacheManager {
               _notify();
               continue;
             }
-            final fetcher = (String u) => JmApi.instance.fetchBytes(
+            Future<Uint8List?> fetcher(String u) => JmApi.instance.fetchBytes(
                   u,
                   referer:
                       task.source.id == 'ehentai' ? ref.resolveUrl : null,
@@ -167,9 +167,7 @@ class ChapterCacheManager {
             if (task.spill && tempDir != null) {
               if (!TempStore.instance.has(tempDir, ref.index)) {
                 var sb = await ImageCacheManager.instance.readDiskOnly(url);
-                if (sb == null) {
-                  sb = await fetcher(url);
-                }
+                sb ??= await fetcher(url);
                 if (sb != null) {
                   var sdata = sb;
                   if (sid != null &&

@@ -4,7 +4,7 @@ import '../core/app_theme.dart';
 import '../core/jm_service.dart';
 import '../widgets/common_widgets.dart';
 import '../core/l10n.dart';
-import 'novel_pages.dart';
+import 'novel_detail_page.dart';
 
 class NovelsPage extends StatefulWidget {
   const NovelsPage({super.key});

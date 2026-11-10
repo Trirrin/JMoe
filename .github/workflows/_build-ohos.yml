@@ -1,0 +1,99 @@
+name: Build HarmonyOS
+
+on:
+  workflow_call:
+
+jobs:
+  build-ohos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl xz-utils zip libglu1-mesa libgl1-mesa-dev \
+            cmake ninja-build g++ jq
+
+      - name: Cache ohos sdk
+        uses: actions/cache@v4
+        with:
+          path: ~/ohos-sdk
+          key: ohos-sdk-${{ runner.os }}-26.0.0.821
+          restore-keys: ohos-sdk-${{ runner.os }}-
+
+      - name: Setup HarmonyOS toolchain
+        uses: ErBWs/setup-ohos@v2
+        with:
+          version: '26.0.0.821'
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache flutter ohos sdk
+        uses: actions/cache@v4
+        with:
+          path: ~/flutter-ohos
+          key: flutter-ohos-${{ runner.os }}-3.47.7
+          restore-keys: flutter-ohos-${{ runner.os }}-
+
+      - name: Setup flutter ohos
+        run: |
+          if [ ! -d "$HOME/flutter-ohos" ]; then
+            git clone --depth 1 -b oh-3.47.7-dev \
+              https://gitcode.com/CPF-Flutter/flutter_flutter.git \
+              "$HOME/flutter-ohos"
+            cd "$HOME/flutter-ohos"
+            git tag 3.47.7
+          fi
+          echo "$HOME/flutter-ohos/bin" >> $GITHUB_PATH
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache/hosted
+            ~/.pub-cache/git
+          key: pub-ohos-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-ohos-${{ runner.os }}-
+
+      - run: flutter --version
+
+      - run: flutter pub get
+
+      - name: Ensure flutter.har
+        run: |
+          HAR_DIR="$HOME/flutter-ohos/bin/cache/artifacts/engine"
+          SRC=""
+          for p in "$HAR_DIR/ohos-arm64-release/flutter.har" "$HAR_DIR/ohos-arm64/flutter.har"; do
+            if [ -f "$p" ]; then SRC="$p"; break; fi
+          done
+          if [ -z "$SRC" ]; then
+            flutter precache --ohos || true
+            for p in "$HAR_DIR/ohos-arm64-release/flutter.har" "$HAR_DIR/ohos-arm64/flutter.har"; do
+              if [ -f "$p" ]; then SRC="$p"; break; fi
+            done
+          fi
+          mkdir -p ohos/har
+          if [ -n "$SRC" ]; then
+            cp "$SRC" ohos/har/flutter.har
+          elif [ -s ohos/har/flutter.har ]; then
+            echo "existing har ok"
+          else
+            echo "missing flutter.har"
+            exit 1
+          fi
+
+      - name: Build HAP
+        run: flutter build hap --release --no-codesign
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jmoe-hap
+          path: ohos/entry/build/default/outputs/default/*.hap
+          if-no-files-found: error
+          retention-days: 7

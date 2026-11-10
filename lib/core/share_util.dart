@@ -23,7 +23,7 @@ class ShareUtil {
     try {
       final r = await _ch.invokeMethod<bool>('shareText', {
         'text': text,
-        if (subject != null) 'subject': subject,
+        'subject': ?subject,
       });
       if (r == true) return true;
     } catch (_) {}

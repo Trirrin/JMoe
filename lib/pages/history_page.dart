@@ -8,7 +8,7 @@ import '../core/models.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/detail_route.dart';
 import 'anime_player_page.dart';
-import 'novel_pages.dart';
+import 'novel_detail_page.dart';
 import 'unified_detail_page.dart';
 import '../core/l10n.dart';
 
@@ -65,8 +65,7 @@ class _HistoryPageState extends State<HistoryPage> {
       body: groups.isEmpty
           ? EmptyView(message: L.t('noHistory'), icon: Icons.history)
           : ListView.separated(
-              padding: const EdgeInsets.all(AppStyle.pagePadding),
-              cacheExtent: 900,
+              cacheExtent: 900, padding: const EdgeInsets.all(AppStyle.pagePadding),
               itemCount: groups.length,
               separatorBuilder: (_, _) => const SizedBox(height: 8),
               itemBuilder: (context, i) => _buildGroupCard(theme, groups[i]),

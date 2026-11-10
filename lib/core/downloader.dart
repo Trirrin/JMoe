@@ -275,7 +275,7 @@ class ChapterDownloader {
                 'source': source.id,
                 'coverFile': albumCover,
                 'coverUrl': coverUrl,
-                if (albumExtra != null) ...albumExtra,
+                ...?albumExtra,
                 'createdAt': DateTime.now().millisecondsSinceEpoch,
               }),
               flush: true,
@@ -435,7 +435,7 @@ class ChapterDownloader {
       final uri = Uri.file(path);
       await _channel.invokeMethod('openPath', {
         'path': uri.toFilePath(),
-        if (mime != null) 'mime': mime,
+        'mime': ?mime,
       });
       return true;
     } catch (_) {

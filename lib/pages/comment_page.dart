@@ -284,14 +284,13 @@ class _CommentPageState extends State<CommentPage> {
                               return false;
                             },
                             child: ListView.separated(
-                              controller: _scroll,
+                              cacheExtent: 900, controller: _scroll,
                               physics: const AlwaysScrollableScrollPhysics(
                                 parent: BouncingScrollPhysics(),
                               ),
                               padding: const EdgeInsets.all(
                                 AppStyle.pagePadding,
                               ),
-                              cacheExtent: 900,
                               itemCount: _comments.length,
                               separatorBuilder: (_, _) =>
                                   const SizedBox(height: 8),

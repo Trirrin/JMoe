@@ -13,7 +13,7 @@ import '../widgets/detail_route.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/scroll_top_fab.dart';
 import 'anime_player_page.dart';
-import 'novel_pages.dart';
+import 'novel_detail_page.dart';
 import 'unified_detail_page.dart';
 import 'unified_home_page.dart';
 
@@ -1219,9 +1219,8 @@ class _SearchPageState extends State<SearchPage>
           _countBar(theme, '${_animes.length}/$_animeTotal'),
         Expanded(
           child: GridView.builder(
-            controller: _scroll,
+            cacheExtent: 1000, controller: _scroll,
             padding: const EdgeInsets.all(AppStyle.pagePadding),
-            cacheExtent: 1000,
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
               mainAxisSpacing: 10,

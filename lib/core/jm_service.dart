@@ -157,7 +157,7 @@ class JmService {
   }) async {
     final r = await _api.get('serialization', {
       'type': type,
-      if (date != null) 'date': date,
+      'date': ?date,
       'page': page,
     });
     final data = r['data'];
@@ -491,7 +491,7 @@ class JmService {
     return _api.post('comment', {
       'aid': aid,
       'comment': comment,
-      if (commentId != null) 'comment_id': commentId,
+      'comment_id': ?commentId,
     });
   }
 
@@ -532,7 +532,7 @@ class JmService {
           {String? aid}) async =>
       _api.post('comment_vote', {
         'comment_id': commentId,
-        if (aid != null) 'aid': aid,
+        'aid': ?aid,
       });
 
   Future<List<Map<String, dynamic>>> fetchNotifications({

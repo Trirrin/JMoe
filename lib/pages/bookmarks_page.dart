@@ -6,7 +6,7 @@ import '../core/l10n.dart';
 import '../core/jm_service.dart';
 import '../core/models.dart';
 import '../widgets/common_widgets.dart';
-import 'novel_pages.dart';
+import 'novel_read_page.dart';
 import 'unified_home_page.dart';
 import 'unified_reader_page.dart';
 

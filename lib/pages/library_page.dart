@@ -15,7 +15,7 @@ import '../core/jm_protocol.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/common_widgets.dart';
 import 'anime_player_page.dart';
-import 'novel_pages.dart';
+import 'novel_detail_page.dart';
 import 'unified_detail_page.dart';
 import 'login_page.dart';
 import 'downloads_hub_page.dart';
@@ -68,10 +68,10 @@ class _LibraryPageState extends State<LibraryPage>
       case FavSort.added:
         list.sort((a, b) {
           final ai = AppState.instance.localFavorites.indexWhere(
-            (f) => '${f['id']}' == '${a.id}',
+            (f) => '${f['id']}' == a.id,
           );
           final bi = AppState.instance.localFavorites.indexWhere(
-            (f) => '${f['id']}' == '${b.id}',
+            (f) => '${f['id']}' == b.id,
           );
           final at = ai < 0
               ? 0
@@ -141,7 +141,7 @@ class _LibraryPageState extends State<LibraryPage>
     final loggedIn = AppState.instance.loggedIn;
 
     setState(() {
-      _items.removeWhere((e) => ids.contains('${e.id}'));
+      _items.removeWhere((e) => ids.contains(e.id));
       _selectionMode = false;
       _selectedIds.clear();
     });
@@ -384,7 +384,7 @@ class _LibraryPageState extends State<LibraryPage>
     setState(() {
       _cloudIds
         ..clear()
-        ..addAll(cloud.map((e) => _normId('${e.id}')));
+        ..addAll(cloud.map((e) => _normId(e.id)));
       _cloudKnown = true;
     });
 
@@ -495,9 +495,9 @@ class _LibraryPageState extends State<LibraryPage>
           ..addAll(all);
         _cloudIds
           ..clear()
-          ..addAll(all.map((e) => _normId('${e.id}')));
+          ..addAll(all.map((e) => _normId(e.id)));
         _cloudKnown = cloudOk;
-        final listed = _items.map((e) => _normId('${e.id}')).toSet();
+        final listed = _items.map((e) => _normId(e.id)).toSet();
         for (final fav in AppState.instance.localFavorites) {
           final id = '${fav['id'] ?? ''}';
           if (id.isEmpty || listed.contains(_normId(id))) continue;
@@ -664,7 +664,7 @@ class _LibraryPageState extends State<LibraryPage>
                       icon: const Icon(Icons.flip_to_back_rounded),
                       onPressed: () {
                         setState(() {
-                          final all = _items.map((e) => '${e.id}').toSet();
+                          final all = _items.map((e) => e.id).toSet();
                           final next = all.difference(_selectedIds);
                           _selectedIds
                             ..clear()
@@ -680,7 +680,7 @@ class _LibraryPageState extends State<LibraryPage>
                           _selectedIds
                             ..clear()
                             ..addAll(
-                              _items.map((e) => '${e.id}'),
+                              _items.map((e) => e.id),
                             );
                         });
                       },
@@ -851,7 +851,7 @@ class _LibraryPageState extends State<LibraryPage>
                                 child: Builder(
                                   builder: (context) {
                                     final c = c0;
-                                    final id = '${c.id}';
+                                    final id = c.id;
                                     final picked =
                                         _selectedIds.contains(id);
                                     final isCloud = state.loggedIn &&

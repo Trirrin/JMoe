@@ -274,8 +274,7 @@ class _UnifiedCategoriesPageState extends State<UnifiedCategoriesPage>
       width: wide ? 96 : 88,
       color: scheme.surfaceContainerLow,
       child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        cacheExtent: 600,
+        cacheExtent: 600, padding: const EdgeInsets.symmetric(vertical: 8),
         itemCount: _cats.length,
         itemBuilder: (context, i) {
           final c = _cats[i];

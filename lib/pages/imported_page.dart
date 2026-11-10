@@ -21,7 +21,7 @@ class FilePickerChannel {
     try {
       return await _ch.invokeMethod<String>('pickFile', {
         'extensions': extensions,
-        if (mimeType != null) 'mime': mimeType,
+        'mime': ?mimeType,
       });
     } catch (_) {
       return null;

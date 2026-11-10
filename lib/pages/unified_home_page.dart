@@ -585,12 +585,11 @@ class UnifiedHomePageState extends State<UnifiedHomePage>
             SizedBox(
               height: 208,
               child: ListView.separated(
-                key: PageStorageKey('hrow_${_source.id}_${s.title}'),
+                cacheExtent: 800, key: PageStorageKey('hrow_${_source.id}_${s.title}'),
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(
                   horizontal: AppStyle.pagePadding + 4,
                 ),
-                cacheExtent: 800,
                 itemCount: s.items.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 10),
                 itemBuilder: (context, i) {

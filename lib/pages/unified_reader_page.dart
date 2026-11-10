@@ -637,9 +637,8 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
       });
     }
     return ListView.builder(
-      controller: _scroll,
+      cacheExtent: 2000, controller: _scroll,
       itemCount: _localFiles.length,
-      cacheExtent: 2000,
       physics: const ClampingScrollPhysics(),
       itemBuilder: (context, i) => _buildLocalPage(i),
     );
@@ -696,9 +695,8 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
                 MediaQuery.of(context).devicePixelRatio)
             .round();
     return ListView.builder(
-      controller: _scroll,
+      cacheExtent: 2000, controller: _scroll,
       itemCount: b.length,
-      cacheExtent: 2000,
       physics: const ClampingScrollPhysics(),
       itemBuilder: (context, i) {
         return RepaintBoundary(

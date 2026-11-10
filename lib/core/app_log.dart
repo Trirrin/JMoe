@@ -39,7 +39,7 @@ class AppLog {
   }
 
   Future<void> error(String tag, Object e, [StackTrace? st]) =>
-      log(tag, e, st == null ? null : st.toString().split('\n').take(3).join(' / '));
+      log(tag, e, st?.toString().split('\n').take(3).join(' / '));
 
   Future<void> _trim(File f) async {
     try {

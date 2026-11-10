@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analyze-and-test:
+    uses: ./.github/workflows/_analyze.yml
+
+  build-apk:
+    needs: analyze-and-test
+    uses: ./.github/workflows/_build-android.yml
+
+  build-ios:
+    needs: analyze-and-test
+    uses: ./.github/workflows/_build-ios.yml
+
+  build-ohos:
+    needs: analyze-and-test
+    uses: ./.github/workflows/_build-ohos.yml
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [build-apk, build-ios, build-ohos]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten and rename
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir -p out
+          for f in dist/*/*.apk; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            case "$base" in
+              *arm64-v8a*)   arch=arm64 ;;
+              *armeabi-v7a*) arch=arm32 ;;
+              *x86_64*)      arch=x64 ;;
+              *)             arch=universal ;;
+            esac
+            cp "$f" "out/JMoe-$VER-android-$arch.apk"
+          done
+          for f in dist/*/*.ipa; do
+            [ -f "$f" ] && cp "$f" "out/JMoe-$VER-ios.ipa" || true
+          done
+          for f in dist/*/*.hap; do
+            [ -f "$f" ] && cp "$f" "out/JMoe-$VER-ohos.hap" || true
+          done
+          ls -lh out
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false

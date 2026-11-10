@@ -96,7 +96,7 @@ class JmProtocol {
       }
     }
     if (body is! Map) {
-      print('[JMOE] ' + 'decodeResponse: body not map');
+      print('[JMOE] ' 'decodeResponse: body not map');
       return {'code': -1, 'data': null, 'errorMsg': L.t('responseFormatError')};
     }
     final map = Map<String, dynamic>.from(body);
@@ -124,7 +124,7 @@ class JmProtocol {
       try {
         map['data'] = jsonDecode(data);
       } catch (_) {
-        print('[JMOE] decrypt failed, ts=' + timestamp.toString());
+        print('[JMOE] decrypt failed, ts=$timestamp');
         map['data'] = null;
       }
     }
@@ -278,7 +278,7 @@ class JmApi {
 
     final best = await pickFastestHost();
     _baseUrl = 'https://${best ?? hosts.first[0]}/';
-    print('[JMOE] bootstrap picked host=' + (_baseUrl ?? ''));
+    print('[JMOE] bootstrap picked host=${_baseUrl ?? ''}');
   }
 
   Future<String?> pickFastestHost({
@@ -442,7 +442,7 @@ class JmApi {
       final ts = _now();
       try {
         final res = await _dio.get<dynamic>(
-          '${baseUrl}$path',
+          '$baseUrl$path',
           queryParameters: clean,
           options: Options(
             headers: _headers(ts),
@@ -451,7 +451,7 @@ class JmApi {
         );
         final map = JmProtocol.decodeResponse(res.data, ts, path);
         final code = map['code'];
-        print('[JMOE] ' + 'GET ' + path + ' -> code=' + code.toString());
+        print('[JMOE] GET $path -> code=$code');
         if (code == 200) return map;
         if (attempt < 3) {
           await Future<void>.delayed(
@@ -462,7 +462,7 @@ class JmApi {
         }
         return map;
       } catch (e) {
-        print('[JMOE] ' + 'GET ' + path + ' EXC: ' + e.toString());
+        print('[JMOE] GET $path EXC: $e');
         lastError = e;
         if (attempt < 3) {
           await Future<void>.delayed(
@@ -496,7 +496,7 @@ class JmApi {
           body[k] = v.toString();
         });
         final res = await _dio.post<dynamic>(
-          '${baseUrl}$path',
+          '$baseUrl$path',
           data: body,
           options: Options(
             headers: {
@@ -553,7 +553,7 @@ class JmApi {
           form.fields.add(MapEntry(k, v.toString()));
         });
         final res = await _dio.post<dynamic>(
-          '${baseUrl}$path',
+          '$baseUrl$path',
           data: form,
           options: Options(
             headers: _headers(ts),
@@ -609,7 +609,7 @@ class JmApi {
           responseType: ResponseType.bytes,
           headers: {
             'User-Agent': 'okhttp/4.12.0',
-            if (referer != null) 'Referer': referer,
+            'Referer': ?referer,
           },
         ),
       );
