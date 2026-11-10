@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/app_info.dart';
 import '../core/app_state.dart';
+import '../core/platform_caps.dart';
 import '../core/app_theme.dart';
 import '../core/jm_protocol.dart';
 import '../core/jm_service.dart';
@@ -62,7 +63,10 @@ class _SettingsPageState extends State<SettingsPage>
             _buildBackgroundTile(theme, state),
             SectionHeader(title: L.t('reading')),
             _buildReaderModeTile(theme, state),
-            _buildVolumeKeyTile(theme, state),
+            // 音量键翻页只有 Android 支持（iOS / 鸿蒙不允许拦截硬件键）。
+            // 不支持的平台**整块隐藏** —— 用户不该看到点了没反应的开关。
+            if (PlatformCaps.supportsVolumeKeyPaging)
+              _buildVolumeKeyTile(theme, state),
             _buildStartTabTile(theme, state),
             _buildBannerTile(theme, state),
             _buildCardSizeTile(theme, state),

@@ -50,17 +50,16 @@ class HostStore extends ChangeNotifier {
   static final HostStore instance = HostStore._();
 
   static const _kCustom = 'customHosts';
-  static const _kPinned = 'pinnedHost';
   static const _kSkipStartup = 'skipStartup';
 
   SharedPreferences? _prefs;
 
   final List<CustomHost> _custom = [];
 
-  /// 固定的线路（空 = 不固定，每次显示启动页）
-  String pinnedHost = '';
-
-  /// 是否启动时跳过启动页（仅当 pinnedHost 非空时有效）
+  /// 是否启动时跳过启动页。
+  ///
+  /// 开启后直接用「上次进入所用的线路」连接（AppState.apiHost），
+  /// 不需要单独「固定线路」—— 少一个概念、少一处不一致。
   bool skipStartup = false;
 
   List<CustomHost> get customHosts => List.unmodifiable(_custom);
@@ -90,7 +89,6 @@ class HostStore extends ChangeNotifier {
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
-    pinnedHost = _prefs?.getString(_kPinned) ?? '';
     skipStartup = _prefs?.getBool(_kSkipStartup) ?? false;
     final raw = _prefs?.getString(_kCustom);
     if (raw != null && raw.isNotEmpty) {
@@ -125,16 +123,7 @@ class HostStore extends ChangeNotifier {
 
   Future<void> removeCustom(String host) async {
     _custom.removeWhere((e) => e.host == host);
-    if (pinnedHost == host) {
-      pinnedHost = '';
-      await _persistPinned();
-    }
     await _persistCustom();
-  }
-
-  Future<void> setPinned(String host) async {
-    pinnedHost = host;
-    await _persistPinned();
   }
 
   Future<void> setSkipStartup(bool v) async {
@@ -149,10 +138,5 @@ class HostStore extends ChangeNotifier {
       _kCustom,
       jsonEncode(_custom.map((e) => e.toJson()).toList()),
     );
-  }
-
-  Future<void> _persistPinned() async {
-    notifyListeners();
-    await _prefs?.setString(_kPinned, pinnedHost);
   }
 }

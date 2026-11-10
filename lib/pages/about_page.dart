@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/app_info.dart';
 import '../core/app_theme.dart';
 import '../core/l10n.dart';
+import '../widgets/app_logo.dart';
 
 /// 「关于」独立页面（参照 Kazumi 的信息组织方式）。
 ///
@@ -66,19 +67,8 @@ class AboutPage extends StatelessWidget {
           Center(
             child: Column(
               children: [
-                Container(
-                  width: 84,
-                  height: 84,
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: Icon(
-                    Icons.auto_stories_rounded,
-                    size: 44,
-                    color: scheme.onPrimaryContainer,
-                  ),
-                ),
+                // 应用图标（与桌面图标同源，不是通用书籍图标）
+                const AppLogo(size: 84),
                 const SizedBox(height: 14),
                 Text(
                   'JMoe',

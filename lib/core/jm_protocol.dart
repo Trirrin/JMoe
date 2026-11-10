@@ -104,6 +104,17 @@ class JmProtocol {
     String path,
   ) {
     if (body is String) {
+      // **空响应体 = 成功**。
+      //
+      // 实测 comment_vote（评论点赞）成功时返回 HTTP 200 且 body 只有
+      // 一个换行符，没有任何 JSON。旧的逻辑会 jsonDecode 失败 →
+      // 返回 code:-1 + errorMsg:"\n" → 上层判定失败 →
+      // 用户看到的就是「点赞没反应 / 一直报错」。
+      //
+      // 这里把「空白 body」直接当作成功（code 200、data null）。
+      if (body.trim().isEmpty) {
+        return {'code': 200, 'data': null};
+      }
       try {
         body = jsonDecode(body);
       } catch (_) {

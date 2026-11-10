@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import 'image_cache.dart';
+import 'image_worker.dart';
 import 'cache_manager.dart';
 import 'models.dart';
 import 'image_scrambler.dart';
@@ -53,13 +54,19 @@ class ChapterCacheManager {
     required ComicSource source,
     required Comic comic,
     required ReadBundle bundle,
-    int concurrency = 5,
+    // 并发 4：
+    // 图像处理已经搬到后台 isolate（ImageWorker），主 isolate 只做
+    // 网络 IO 和一次解码，所以并发可以比原来高一些 ——
+    // 更多地并行下载能喂饱后台 worker，快速滑动时不至于等图。
+    int concurrency = 4,
     bool skipIfCached = false,
     /// 是否把图片写入磁盘（true = 用户主动下载）。
     /// 阅读时「边看边缓存」只进内存，退出即释放。
     bool persistToDisk = false,
     /// 起始页（从 1 开始）。缓存顺序会从这一页向两侧扩散。
     int startPage = 1,
+    /// 解码目标宽度（物理像素）。见 [ChapterCacheTask.decodeWidth]。
+    int? decodeWidth,
   }) {
     final key = keyOf(source.id, bundle.chapterId);
     final existing = _tasks[key];
@@ -75,6 +82,7 @@ class ChapterCacheManager {
       comic: comic,
       bundle: bundle,
     );
+    task.decodeWidth = decodeWidth;
     // 大章节：不在内存里堆整章解码图，改为落临时目录按需读。
     // 阈值见 TempStore.spillPageCount（页数）——单页特别大的情况在写入时
     // 也会被 TempStore.maxSingleImageBytes 兜住。
@@ -209,11 +217,19 @@ class ChapterCacheManager {
                         sid,
                         url,
                       )) {
-                    // 必须还原后再落盘：落的是可直接显示的图
+                    // 必须还原后再落盘：落的是可直接显示的图。
+                    //
+                    // **在后台 isolate 完成**（解码 + 重排 + JPEG 编码），
+                    // 主 isolate 不参与任何图像处理 → 滚动不卡。
                     final pk = ImageScrambler.pageKeyFromUrl(url, ref.index);
                     final seg =
                         ImageScrambler.segments(bundle.scrambleAid, pk);
-                    sdata = await unscramble(sb, seg);
+                    final jpg = await ImageWorker.instance.unscrambleToJpeg(
+                      bytes: sb,
+                      segments: seg,
+                      maxWidth: task.decodeWidth,
+                    );
+                    if (jpg != null) sdata = jpg;
                   }
                   await TempStore.instance.put(
                     tempDir,
@@ -242,31 +258,64 @@ class ChapterCacheManager {
                   );
             if (bytes != null) {
               var data = bytes;
-              if (sid != null &&
+              final needScramble = sid != null &&
                   ImageScrambler.needScramble(
                     bundle.scrambleAid,
                     sid,
                     url,
-                  )) {
+                  );
+              int seg = 1;
+              if (needScramble) {
                 final pk = ImageScrambler.pageKeyFromUrl(url, ref.index);
-                final seg = ImageScrambler.segments(bundle.scrambleAid, pk);
-                data = await unscramble(bytes, seg);
+                seg = ImageScrambler.segments(bundle.scrambleAid, pk);
               }
-              // 单张特别大（解码后可能几十 MB）→ 单独落临时目录，不驻留内存
-              if (data.length > TempStore.maxSingleImageBytes) {
-                task.tempDir ??= await TempStore.instance
-                    .dirFor(task.source.id, bundle.chapterId);
-                await TempStore.instance.put(
-                  task.tempDir!,
-                  ref.index,
-                  data,
-                  sourceId: task.source.id,
-                  chapterId: bundle.chapterId,
+
+              // 所有图像处理（打乱还原 + 编码）都在**后台常驻 isolate** 完成。
+              //
+              // 这是「缓存不卡阅读」的关键：主 isolate 只做网络 IO 和
+              // 一次内存拷贝，不再解码/重绘/PNG 编码，滚动帧永远拿得到 CPU。
+              //
+              // 需要进内存的页（当前页附近）：
+              //   后台还原+编码成 JPEG → 主 isolate 只解码这一张
+              //   （解码是引擎原生实现，比 Canvas 重绘 + PNG 编码快得多）
+              if (task.shouldDecodePage(i)) {
+                Uint8List? jpg;
+                if (needScramble) {
+                  jpg = await ImageWorker.instance.unscrambleToJpeg(
+                    bytes: data,
+                    segments: seg,
+                    maxWidth: task.decodeWidth,
+                    // 内存用图质量略低一点，省解码时间
+                    quality: 88,
+                  );
+                }
+                final img = await ImageCacheManager.decodeScaled(
+                  jpg ?? data,
+                  targetWidth: task.decodeWidth,
                 );
+                if (img != null) ImageCacheManager.instance.putUi(url, img);
                 task.doneFlags[i] = true;
               } else {
-                final img = await ImageCacheManager.decode(data);
-                if (img != null) ImageCacheManager.instance.putUi(url, img);
+                // 远处的页：只保证已下载 + 已还原（写盘），不占内存。
+                if (needScramble) {
+                  final jpg = await ImageWorker.instance.unscrambleToJpeg(
+                    bytes: data,
+                    segments: seg,
+                    maxWidth: task.decodeWidth,
+                  );
+                  if (jpg != null) data = jpg;
+                }
+                if (data.length > TempStore.maxSingleImageBytes) {
+                  task.tempDir ??= await TempStore.instance
+                      .dirFor(task.source.id, bundle.chapterId);
+                  await TempStore.instance.put(
+                    task.tempDir!,
+                    ref.index,
+                    data,
+                    sourceId: task.source.id,
+                    chapterId: bundle.chapterId,
+                  );
+                }
                 task.doneFlags[i] = true;
               }
             }
@@ -337,7 +386,62 @@ class ChapterCacheManager {
 
   void _notify() => revision.value++;
 
-  /// 纵向切段逆序还原。
+  /// 纵向切段逆序还原，**直接返回还原后的 ui.Image**。
+  ///
+  /// 相比 [unscramble] 省掉了最后一步 `toByteData(png)` 重新编码 ——
+  /// 对 800×5000 的图，PNG 压缩要在主 isolate 上跑上百毫秒，
+  /// 缓存任务和滚动帧抢 CPU，这就是「边看边缓存时滚动卡顿」的主因。
+  ///
+  /// 而边看边缓存拿到字节后马上又要 `decode` 回 ui.Image，
+  /// 等于「解码 → 重绘 → PNG 编码 → 再解码」，两轮全尺寸处理全白做。
+  ///
+  /// 调用方负责在使用后 `dispose()` 返回的图（除非已交给缓存持有）。
+  static Future<ui.Image?> unscrambleToImage(
+    Uint8List bytes,
+    int segments, {
+    int? targetWidth,
+  }) async {
+    final src = await ImageCacheManager.decodeScaled(
+      bytes,
+      targetWidth: targetWidth,
+    );
+    if (src == null) return null;
+    if (segments <= 1) return src;
+
+    final w = src.width;
+    final h = src.height;
+    if (h < segments) {
+      // 不够分段，原图即可
+      return src;
+    }
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final rem = h % segments;
+    final baseH = h ~/ segments;
+    for (var i = 0; i < segments; i++) {
+      var ch = baseH;
+      var py = baseH * i;
+      final y = h - baseH * (i + 1) - rem;
+      if (i == 0) {
+        ch += rem;
+      } else {
+        py += rem;
+      }
+      canvas.drawImageRect(
+        src,
+        Rect.fromLTWH(0, y.toDouble(), w.toDouble(), ch.toDouble()),
+        Rect.fromLTWH(0, py.toDouble(), w.toDouble(), ch.toDouble()),
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+    }
+    final picture = recorder.endRecording();
+    final out = await picture.toImage(w, h);
+    src.dispose();
+    picture.dispose();
+    return out;
+  }
+
+  /// 纵向切段逆序还原（返回字节，用于写盘）。
   static Future<Uint8List> unscramble(Uint8List bytes, int segments) async {
     if (segments <= 1) return bytes;
     final src = await ImageCacheManager.decode(bytes);
@@ -403,6 +507,41 @@ class ChapterCacheTask {
 
   /// 是否写盘：true = 用户主动下载；false = 边看边缓存（仅内存）。
   bool persistToDisk = false;
+
+  /// 「边看边缓存」模式下，只把当前页附近的页解码进内存。
+  ///
+  /// 为什么要限制范围：整章解码会留几十~上百张 ui.Image 在内存里，
+  /// 而且解码本身要在主 isolate 上跑 —— 用户缓慢滚动时，
+  /// 滚动帧与解码抢 CPU，表现就是「异常卡顿、几乎无法观看」。
+  ///
+  /// 只解码 [startPage] 前后 [decodeRadius] 页：读者当前看到的页
+  /// 和即将看到的页都已在内存，滚动无等待；
+  /// 其余页仍然下载并落盘（离线可用），只是不占内存。
+  ///
+  /// 从 4 提到 8：快速滑动时一屏能掠过好几页，
+  /// 窗口太小会滑出预解码范围 → 每页都要临时解码 → 微微卡顿。
+  static const int decodeRadius = 8;
+
+  /// 提前解码的方向不对称：向后多备一些。
+  ///
+  /// 用户几乎总是往下读，所以「往后」多解 3 倍于「往前」，
+  /// 用同样的内存换到更跟手的快速下滑体验。
+  static const int decodeAhead = 4;
+
+  /// 解码目标宽度（物理像素）。null = 按原图尺寸解码。
+  ///
+  /// 由阅读页传入屏幕物理宽度：漫画页常是 800×5000 的超长图，
+  /// 全尺寸解码既慢又占内存，而实际只显示到屏幕宽度。
+  int? decodeWidth;
+
+  /// 单页解码图是否保留在内存（按页号判断）。
+  bool shouldDecodePage(int index) {
+    if (persistToDisk) return true; // 主动下载：全解码，读时零等待
+    final d = index - startPage;
+    // 往后（d>0）多留 decodeAhead 倍，往前少留
+    final limit = d >= 0 ? decodeRadius * decodeAhead : decodeRadius;
+    return d.abs() <= limit;
+  }
 
   /// 大章节的临时目录（页数多 / 单页特别大时才创建）。
   ///

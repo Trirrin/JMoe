@@ -15,7 +15,9 @@ import '../core/jm_service.dart';
 import '../core/image_scrambler.dart';
 import '../core/models.dart';
 import '../core/source.dart';
+import '../core/platform_caps.dart';
 import '../core/temp_store.dart';
+import '../core/zip_packer.dart';
 import 'widgets/cache_overlay.dart';
 import '../core/l10n.dart';
 
@@ -151,8 +153,11 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     ChapterCacheManager.instance.revision.addListener(_onCacheTick);
     // ---- 音量键翻页 ----
     // 阅读页启用：音量键改为翻页而不是调音量。
-    // 仅当用户开启了该设置（默认开启）时才拦。
-    if (AppState.instance.volumeKeyPage) {
+    //
+    // 仅 Android 支持（iOS / 鸿蒙不允许拦截硬件音量键）。
+    // 不支持的平台直接跳过，连通道都不注册 —— 避免无效调用。
+    if (PlatformCaps.supportsVolumeKeyPaging &&
+        AppState.instance.volumeKeyPage) {
       _volKeyOn = true;
       _volChannel.setMethodCallHandler(_onVolumeKey);
       unawaited(
@@ -230,6 +235,21 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     _progressNotifier.dispose();
     _pageNotifier.dispose();
     ChapterCacheManager.instance.revision.removeListener(_onCacheTick);
+    // **离开阅读页必须停掉本章缓存任务**。
+    //
+    // 之前只移除了监听，任务还在后台继续下载 + 解码整章
+    // （799 页的章节会持续很久）。缓存解码只能在主 isolate 上跑，
+    // 于是退出阅读页后整个 App 都在和它抢 CPU ——
+    // 这就是「打开漫画再退出，整个 app 都卡」的原因。
+    //
+    // 注意：这里只取消「边看边缓存」的任务（persistToDisk=false）。
+    // 用户主动下载的任务必须继续，否则下载会被中途掐断。
+    if (_task != null && !_task!.persistToDisk) {
+      ChapterCacheManager.instance.cancel(
+        widget.source.id,
+        _task!.bundle.chapterId,
+      );
+    }
     // 离开阅读页 → 关闭音量键拦截，恢复系统音量调节
     if (_volKeyOn) {
       _volChannel.setMethodCallHandler(null);
@@ -242,8 +262,26 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     super.dispose();
   }
 
+  /// 缓存进度变化 → **不重建整页**，只刷新底栏/顶栏那一小块。
+  ///
+  /// 之前直接 setState：缓存任务每完成一页就自增 revision 通知一次，
+  /// 边看边缓存（3 路并发）时等于每秒重建阅读器十几次 ——
+  /// 每次重建都会重新布局所有可见 ReaderPageView、重新绑定图片，
+  /// 这就是「缓慢滑动异常卡顿、完全无法观看」的直接原因。
+  ///
+  /// 现在只更新一个 notifier，由顶栏/底栏各自局部监听。
+  int _cacheReady = 0;
+  int _cacheTotal = 0;
+  final _cacheNotifier = ValueNotifier<int>(0);
+
   void _onCacheTick() {
-    if (mounted) setState(() {});
+    final t = _task;
+    if (t == null) return;
+    final ready = t.readyOrDone;
+    if (ready == _cacheReady && t.total == _cacheTotal) return;
+    _cacheReady = ready;
+    _cacheTotal = t.total;
+    _cacheNotifier.value = ready;
   }
 
   /// 滚动监听：**不 setState**，避免每帧重建整页导致卡死。
@@ -256,6 +294,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
   void _onScroll() {
     if (!_vertical) return;
     if (!_scroll.hasClients) return;
+
     final pos = _scroll.position;
     if (!pos.hasContentDimensions) return;
     final max = pos.maxScrollExtent;
@@ -272,6 +311,11 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
       _currentPage = page;
       // 保存进度本身有 3 秒节流，不会每帧写盘
       _saveProgress(page);
+      // **让缓存任务的「解码窗口」跟着读者走**：
+      // 只有当前页附近的页需要留在内存，远处的页落盘即可。
+      // 不更新 startPage 的话，窗口会一直停在进入时那一页，
+      // 读者滑到后面反而全靠临时解码 → 就是「缓慢滑动异常卡顿」。
+      _task?.startPage = page - 1;
     }
   }
 
@@ -304,13 +348,32 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     );
   }
 
-  /// 离线加载：扫描目录里的图片文件。
+  /// 离线加载：扫描目录里的图片文件，或从 zip 包里读页。
   ///
   /// 复用在线阅读器的一切（顶栏/底栏/翻页模式/缩放/进度），
   /// 只是数据源换成磁盘。这样用户不会感到「离线是另一个 App」。
   Future<void> _loadLocal() async {
     try {
-      final dir = Directory(widget.localDir!);
+      // **已打包成 zip**：把包内页解到应用缓存目录再按普通目录读。
+      //
+      // 下载完成会自动收拢成 zip（用户要求「下载后应该是压缩包」），
+      // 所以离线阅读必须支持 zip。这里选择"解包到缓存"而不是
+      // 每次从 zip 里逐个解压读取 —— 后者每翻一页都要重新解析
+      // 整个 zip 目录，翻页会明显变慢。
+      var lp = widget.localDir!;
+      if (lp.toLowerCase().endsWith('.zip')) {
+        final extracted = await ZipReader.extractToCache(lp);
+        if (extracted == null) {
+          if (!mounted) return;
+          setState(() {
+            _loading = false;
+            _error = L.t('offlineEmpty');
+          });
+          return;
+        }
+        lp = extracted;
+      }
+      final dir = Directory(lp);
       if (!await dir.exists()) {
         if (!mounted) return;
         setState(() {
@@ -460,6 +523,12 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         skipIfCached: alreadyCached,
         // 从用户当前所在页向两侧扩散加载，优先保证眼前这一页
         startPage: _currentPage,
+        // 按屏幕物理宽度解码：漫画页常是超长图，全尺寸解码
+        // 又慢又占内存，而实际只显示到屏幕宽度。
+        decodeWidth:
+            (MediaQuery.of(context).size.width *
+                    MediaQuery.of(context).devicePixelRatio)
+                .round(),
       );
       if (!mounted) return;
       // 大章节：临时目录就绪后再「占用」，离开阅读页才释放。
@@ -546,34 +615,43 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
               right: 0,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: LinearProgressIndicator(
-                          value: task.progress,
-                          minHeight: 2.5,
-                          backgroundColor: Colors.white24,
-                          valueColor: AlwaysStoppedAnimation(
-                            Theme.of(context).colorScheme.primary,
+                // 进度条用 ValueListenableBuilder 自行刷新：
+                // 缓存 tick 不再触发整页 setState（那样会重建所有可见页），
+                // 改由这里局部监听，进度仍然实时更新。
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _cacheNotifier,
+                  builder: (context, ready, _) {
+                    final prog =
+                        task.total == 0 ? 0.0 : (ready / task.total).clamp(0.0, 1.0);
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(2),
+                            child: LinearProgressIndicator(
+                              value: prog,
+                              minHeight: 2.5,
+                              backgroundColor: Colors.white24,
+                              valueColor: AlwaysStoppedAnimation(
+                                Theme.of(context).colorScheme.primary,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // 进度条右侧显示**百分比**。
-                    // 「已缓存/总缓存」在顶栏已经显示，这里不重复。
-                    Text(
-                      '${(task.progress * 100).round()}%',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        fontFeatures: [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ],
+                        const SizedBox(width: 8),
+                        // 进度条右侧显示百分比
+                        Text(
+                          '${(prog * 100).round()}%',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -644,8 +722,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
           ),
         );
       }
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      return _TapToToggleUi(
         onTap: () => setState(() => _showUi = !_showUi),
         child: _vertical ? _buildLocalVertical() : _buildLocalHorizontal(),
       );
@@ -656,8 +733,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         child: Text(L.t('noImages'), style: TextStyle(color: Colors.white70)),
       );
     }
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    return _TapToToggleUi(
       onTap: () => setState(() => _showUi = !_showUi),
       child: _vertical ? _buildVertical(b) : _buildHorizontal(b),
     );
@@ -681,7 +757,8 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
     return ListView.builder(
       controller: _scroll,
       itemCount: _localFiles.length,
-      cacheExtent: 6000,
+      // 从 6000 降到 2000：6000 会同时构建并解码约 8 页，负担过重。
+      cacheExtent: 2000,
       physics: const ClampingScrollPhysics(),
       itemBuilder: (context, i) => _buildLocalPage(i),
     );
@@ -746,27 +823,44 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
         _scroll.jumpTo(target.clamp(0.0, _scroll.position.maxScrollExtent));
       });
     }
+    // 解码宽度 = 屏幕物理宽度。
+    //
+    // 不再乘 1.15 冗余：冗余会让像素量多 32%、解码慢 32%，
+    // 而 BoxFit.fitWidth 本来就按屏幕宽绘制，多出的像素全被丢弃。
+    // 追求「快速滑动更跟手」优先，清晰度肉眼无差别。
+    final decodeW =
+        (MediaQuery.of(context).size.width *
+                MediaQuery.of(context).devicePixelRatio)
+            .round();
     return ListView.builder(
       controller: _scroll,
       itemCount: b.length,
-      cacheExtent: 6000,
+      // 从 6000 降到 2000：6000 会同时构建并解码约 8 页，负担过重。
+      cacheExtent: 2000,
       physics: const ClampingScrollPhysics(),
       itemBuilder: (context, i) {
-        return ReaderPageView(
-          key: ValueKey('${b.chapterId}_${i}_${b.pages[i].index}'),
-          ref: b.pages[i],
-          scrambleId: b.scrambleId,
-          scrambleAid: b.scrambleAid,
-          albumId: widget.comic.id,
-          source: widget.source,
-          cacheKey: b.pages[i].directUrl ??
-              b.pages[i].resolveUrl ??
-              'page_${b.pages[i].index}',
-          chapterId: b.chapterId,
-          tempDir: _tempDir,
-          // 占位高度沿用「上一页真实比例」，图片载入时就不会跳
-          fallbackRatio: _ratioAt(i),
-          onLoaded: (r) => _rememberRatio(i, r),
+        return RepaintBoundary(
+          // 每页独立重绘边界：
+          // 快速滑动时某页图片刚解码完成会触发重建，
+          // 没有边界的话整屏所有页都要重绘；有了边界只重绘本页。
+          // 这是「滑太快微微卡顿」最直接的改善点。
+          child: ReaderPageView(
+            key: ValueKey('${b.chapterId}_${i}_${b.pages[i].index}'),
+            ref: b.pages[i],
+            decodeWidth: decodeW,
+            scrambleId: b.scrambleId,
+            scrambleAid: b.scrambleAid,
+            albumId: widget.comic.id,
+            source: widget.source,
+            cacheKey: b.pages[i].directUrl ??
+                b.pages[i].resolveUrl ??
+                'page_${b.pages[i].index}',
+            chapterId: b.chapterId,
+            tempDir: _tempDir,
+            // 占位高度沿用「上一页真实比例」，图片载入时就不会跳
+            fallbackRatio: _ratioAt(i),
+            onLoaded: (r) => _rememberRatio(i, r),
+          ),
         );
       },
     );
@@ -809,6 +903,11 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
             child: ReaderPageView(
               key: ValueKey('${b.chapterId}_${i}_${b.pages[i].index}'),
               ref: b.pages[i],
+              // 横向：一页占满屏幕，按屏幕宽度解码即可
+              decodeWidth:
+                  (MediaQuery.of(context).size.width *
+                          MediaQuery.of(context).devicePixelRatio)
+                      .round(),
               scrambleId: b.scrambleId,
               scrambleAid: b.scrambleAid,
               albumId: widget.comic.id,
@@ -921,13 +1020,19 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage> {
                 ),
               ),
             ),
-            // 顶栏缓存指示（xx/xx），后台缓存时也能看到
+            // 顶栏缓存指示（xx/xx），后台缓存时也能看到。
+            // 用 ValueListenableBuilder 局部刷新 —— 缓存每完成一页都会
+            // 通知，若走整页 setState 会把所有可见页重建一遍（卡顿主因）。
             if (_task != null && !_task!.isCompleted)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Text(
-                  '${_task!.done}/${_task!.total}',
-                  style: const TextStyle(color: Colors.white60, fontSize: 11),
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _cacheNotifier,
+                  builder: (context, ready, _) => Text(
+                    '$ready/${_task!.total}',
+                    style:
+                        const TextStyle(color: Colors.white60, fontSize: 11),
+                  ),
                 ),
               )
             else if (_task?.isCompleted == true)
@@ -1286,6 +1391,13 @@ class ReaderPageView extends StatefulWidget {
   /// 图片解码完成后回调真实比例，供后续页面作为占位比例复用。
   final ValueChanged<double>? onLoaded;
 
+  /// 解码目标宽度（物理像素）。null = 按原图尺寸解码。
+  ///
+  /// 漫画页常是 800×5000 的超长图，全尺寸解码既慢又占内存，
+  /// 而实际只显示到屏幕宽度。限制解码宽度能显著减少
+  /// 滚动时每换一页的卡顿。
+  final int? decodeWidth;
+
   const ReaderPageView({
     super.key,
     required this.ref,
@@ -1298,6 +1410,7 @@ class ReaderPageView extends StatefulWidget {
     this.tempDir,
     this.fit = BoxFit.fitWidth,
     this.fallbackRatio = 0.72,
+    this.decodeWidth,
     this.onLoaded,
   });
 
@@ -1355,7 +1468,10 @@ class _ReaderPageViewState extends State<ReaderPageView> {
         chapterId: widget.chapterId,
       );
       if (bytes != null && bytes.isNotEmpty) {
-        final img = await ImageCacheManager.decode(bytes);
+        final img = await ImageCacheManager.decodeScaled(
+          bytes,
+          targetWidth: widget.decodeWidth,
+        );
         if (!mounted) return;
         setState(() {
           _image = img;
@@ -1419,7 +1535,10 @@ class _ReaderPageViewState extends State<ReaderPageView> {
       data = await ChapterCacheManager.unscramble(bytes, seg);
     }
 
-    final img = await ImageCacheManager.decode(data);
+    final img = await ImageCacheManager.decodeScaled(
+      data,
+      targetWidth: widget.decodeWidth,
+    );
     if (img != null) ImageCacheManager.instance.putUi(url, img);
     if (!mounted) return;
     setState(() {
@@ -1579,5 +1698,47 @@ class _LocalImageViewState extends State<_LocalImageView> {
       );
     }
     return RawImage(image: img, fit: BoxFit.fitWidth);
+  }
+}
+
+/// 「点一下切换 UI」的包装：**不抢滚动手势**。
+///
+/// 之前用 `GestureDetector(behavior: opaque, onTap: ...)` 包住列表：
+/// 它的 tap 识别器会和 ListView 的纵向拖动竞争 ——
+/// 快速甩动还行，但**缓慢拖动**时 tap 常被判为"未移动"，
+/// 于是滚动被吃掉，表现就是「死活划不动」。
+///
+/// 改用 Listener：只记录按下位置，抬起时若位移很小才当作点击。
+/// Listener 不参与手势竞技场，滚动手势完全不受影响。
+class _TapToToggleUi extends StatefulWidget {
+  const _TapToToggleUi({required this.onTap, required this.child});
+
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  State<_TapToToggleUi> createState() => _TapToToggleUiState();
+}
+
+class _TapToToggleUiState extends State<_TapToToggleUi> {
+  Offset? _downPos;
+
+  /// 超过这个位移就不算点击（交给滚动）
+  static const double _slop = 12;
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (e) => _downPos = e.position,
+      onPointerUp: (e) {
+        final d = _downPos;
+        _downPos = null;
+        if (d == null) return;
+        if ((e.position - d).distance <= _slop) widget.onTap();
+      },
+      onPointerCancel: (_) => _downPos = null,
+      child: widget.child,
+    );
   }
 }

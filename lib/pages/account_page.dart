@@ -148,9 +148,11 @@ class _AccountPageState extends State<AccountPage> {
     // 直接回落到人形图标，避免显示成一张灰色小图。
     if (p.startsWith('nopic')) return null;
     if (p.startsWith('http')) return p;
-    final host = JmService.instance.imgHost ?? '';
-    // 服务端 photo 是纯文件名（如 xxxxx.jpg），需拼 /media/user/
-    return '$host/media/user/$p';
+    // 服务端 photo 是纯文件名（如 xxxxx.jpg），需拼 /media/user/。
+    //
+    // **必须用主站域名，不能用图片 CDN**：实测 cdn-msp*.jmapiproxy*.cc
+    // 等图片 CDN 对 /media/user/ 返回 0 字节，头像永远加载不出来。
+    return '${JmApi.instance.baseUrl}media/user/$p';
   }
 
   /// 跳转官方网页（不做站内支付）。

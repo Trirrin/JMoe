@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'app_log.dart';
 import 'jm_source.dart';
 import 'models.dart';
+import 'collect_store.dart';
 import 'subscription_store.dart';
 
 /// 订阅更新检查：定期看订阅的作品有没有新章节。
@@ -89,8 +90,75 @@ class SubscriptionChecker {
           unawaited(AppLog.instance.error('SUB', e, st));
         }
       }
+
+      // ---- 关注的作者：检查其全部作品更新 ----
+      //
+      // 用户要求「关注需要订阅这个作者的所有更新」。
+      // 关注是按作者关键词存的，订阅是按作品 id 存的，
+      // 两者维度不同 —— 所以这里单独走一遍：
+      // 按作者名搜作品 → 对每部作品比对章节数基线 → 有变化就通知。
+      await _checkFollowedAuthors();
     } finally {
       _running = false;
+    }
+  }
+
+  /// 检查「关注的作者」名下所有作品是否有更新。
+  Future<void> _checkFollowedAuthors() async {
+    final follows = CollectStore.instance.follows;
+    final authors = follows
+        .where((f) => f.kind == 'author')
+        .map((f) => f.keyword)
+        .toList();
+    if (authors.isEmpty) return;
+
+    for (final author in authors) {
+      try {
+        // 按作者名搜作品（官方 search_type=author）
+        final r = await JmSource.instance.search(
+          author,
+          page: 1,
+          searchType: 'author',
+        );
+        if (r.items.isEmpty) continue;
+        // 只看前若干部，避免一次请求过多被限速
+        for (final c in r.items.take(8)) {
+          try {
+            final info = await JmSource.instance.detail(c);
+            final chapters = info.chapters;
+            if (chapters.isEmpty) continue;
+            final latestId = chapters.last.id;
+            final key = 'author:${c.id}';
+            final base =
+                SubscriptionStore.instance.authorBaseline(key);
+            if (base == null) {
+              // 首次见到 → 只记基线，不打扰用户
+              await SubscriptionStore.instance.setAuthorBaseline(
+                key,
+                chapterCount: chapters.length,
+                lastChapterId: latestId,
+              );
+              continue;
+            }
+            if (chapters.length > base.$1 || latestId != base.$2) {
+              await _notify(
+                title: '$author · ${c.name}',
+                body: chapters.length > base.$1
+                    ? '更新了 ${chapters.length - base.$1} 话'
+                    : '有新的章节',
+                cover: JmSource.instance.coverOf(c) ?? '',
+              );
+              await SubscriptionStore.instance.setAuthorBaseline(
+                key,
+                chapterCount: chapters.length,
+                lastChapterId: latestId,
+              );
+            }
+          } catch (_) {}
+        }
+      } catch (e, st) {
+        unawaited(AppLog.instance.error('SUB-AUTHOR', e, st));
+      }
     }
   }
 

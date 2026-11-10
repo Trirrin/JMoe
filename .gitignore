@@ -46,3 +46,17 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# ---- 签名密钥（绝不入库）----
+*.jks
+*.keystore
+key.properties
+**/key.properties
+*.p12
+*.mobileprovision
+*.cer
+*.p7b
+*.b64
+ohos/entry/*.p12
+ohos/entry/*.cer
+ohos/entry/*.p7b

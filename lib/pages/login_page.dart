@@ -6,6 +6,7 @@ import '../core/jm_protocol.dart';
 import '../core/jm_service.dart';
 import '../core/sync_service.dart';
 import '../core/l10n.dart';
+import '../widgets/app_logo.dart';
 
 /// 登录 / 注册 / 找回密码。
 class LoginPage extends StatefulWidget {
@@ -118,11 +119,8 @@ class _LoginPageState extends State<LoginPage> {
         padding: const EdgeInsets.all(20),
         children: [
           const SizedBox(height: 12),
-          Icon(
-            Icons.auto_stories,
-            size: 56,
-            color: theme.colorScheme.primary,
-          ),
+          // 显示**应用图标**（与桌面图标同源），不是通用书籍图标
+          const Center(child: AppLogo(size: 64)),
           const SizedBox(height: 16),
           Text(
             _register ? L.t('createAccount') : L.t('loginAccount'),

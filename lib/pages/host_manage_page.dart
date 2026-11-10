@@ -284,84 +284,32 @@ class _HostManagePageState extends State<HostManagePage> {
                   child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
               children: [
-                // ---- 固定线路 / 跳过启动页 ----
-                Text(
-                  L.t('pinnedHostSection'),
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  L.t('pinnedHostDesc'),
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 8),
+                // ---- 跳过启动页（独立开关，不绑定具体线路）----
+                //
+                // 开启后启动时直接用「上次进入所用的线路」连接，
+                // 连不通会自动回落到启动页。所以不需要再单独「固定线路」。
                 Container(
                   decoration: BoxDecoration(
                     color: scheme.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Column(
-                    children: [
-                      ListTile(
-                        dense: true,
-                        leading: Icon(
-                          HostStore.instance.pinnedHost.isEmpty
-                              ? Icons.push_pin_outlined
-                              : Icons.push_pin_rounded,
-                          size: 20,
-                          color: HostStore.instance.pinnedHost.isEmpty
-                              ? scheme.onSurfaceVariant
-                              : scheme.primary,
-                        ),
-                        title: Text(
-                          HostStore.instance.pinnedHost.isEmpty
-                              ? L.t('noPinnedHost')
-                              : HostStore.instance.pinnedHost,
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                        trailing: HostStore.instance.pinnedHost.isEmpty
-                            ? null
-                            : TextButton(
-                                onPressed: () async {
-                                  await HostStore.instance.setPinned('');
-                                  await HostStore.instance.setSkipStartup(false);
-                                  if (mounted) setState(() {});
-                                },
-                                child: Text(L.t('clear')),
-                              ),
-                      ),
-                      Divider(
-                        height: 1,
-                        color: scheme.outlineVariant.withValues(alpha: 0.4),
-                      ),
-                      SwitchListTile(
-                        dense: true,
-                        secondary: const Icon(Icons.fast_forward_rounded,
-                            size: 20),
-                        title: Text(
-                          L.t('skipStartupPage'),
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                        subtitle: Text(
-                          L.t('skipStartupPageDesc'),
-                          style: const TextStyle(fontSize: 10.5),
-                        ),
-                        value: HostStore.instance.skipStartup &&
-                            HostStore.instance.pinnedHost.isNotEmpty,
-                        // 未固定线路时不能开启（否则没东西可跳过到）
-                        onChanged: HostStore.instance.pinnedHost.isEmpty
-                            ? null
-                            : (v) async {
-                                await HostStore.instance.setSkipStartup(v);
-                                if (mounted) setState(() {});
-                              },
-                      ),
-                    ],
+                  child: SwitchListTile(
+                    dense: true,
+                    secondary:
+                        const Icon(Icons.fast_forward_rounded, size: 20),
+                    title: Text(
+                      L.t('skipStartupPage'),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    subtitle: Text(
+                      L.t('skipStartupPageDesc'),
+                      style: const TextStyle(fontSize: 10.5),
+                    ),
+                    value: HostStore.instance.skipStartup,
+                    onChanged: (v) async {
+                      await HostStore.instance.setSkipStartup(v);
+                      if (mounted) setState(() {});
+                    },
                   ),
                 ),
                 const SizedBox(height: 22),
@@ -582,36 +530,6 @@ class _HostManagePageState extends State<HostManagePage> {
                 Icon(Icons.check_circle_rounded,
                     size: 18, color: scheme.primary),
               ],
-              // 固定这条线路：之后启动直接进
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: L.t('pinThisHost'),
-                icon: Icon(
-                  HostStore.instance.pinnedHost == it.host
-                      ? Icons.push_pin_rounded
-                      : Icons.push_pin_outlined,
-                  size: 16,
-                  color: HostStore.instance.pinnedHost == it.host
-                      ? scheme.primary
-                      : scheme.onSurfaceVariant.withValues(alpha: 0.6),
-                ),
-                onPressed: () async {
-                  final store = HostStore.instance;
-                  final already = store.pinnedHost == it.host;
-                  if (already) {
-                    await store.setPinned('');
-                    await store.setSkipStartup(false);
-                  } else {
-                    await store.setPinned(it.host);
-                    await store.setSkipStartup(true);
-                  }
-                  if (!mounted) return;
-                  setState(() {});
-                  _toast(already
-                      ? L.t('unpinnedHost')
-                      : L.tp('pinnedHostDone', {'h': it.host}));
-                },
-              ),
             ],
           ),
         ),

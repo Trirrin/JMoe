@@ -213,14 +213,20 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   /// Hero 飞行时不会出现尺寸突变。
   Widget _buildDetailFab() {
     final scheme = Theme.of(context).colorScheme;
+    // 只有章节已加载且非空时才可点。
+    // 章节没回来之前按钮是「禁用态」（灰化 + 不响应），
+    // 避免「点了没反应，加载完才突然跳走」。
+    final ready = _info != null && (_info!.chapters.isNotEmpty);
     return Material(
-      color: scheme.primaryContainer,
+      color: ready
+          ? scheme.primaryContainer
+          : scheme.primaryContainer.withValues(alpha: 0.55),
       borderRadius: BorderRadius.circular(16),
       elevation: 6,
       shadowColor: Colors.black45,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: _enterReading,
+        onTap: ready ? _enterReading : null,
         child: SizedBox(
           height: 56,
           child: Padding(
@@ -229,18 +235,32 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.play_arrow,
-                  size: 20,
-                  color: scheme.onPrimaryContainer,
-                ),
+                if (!ready)
+                  // 未就绪：显示小转圈而不是播放图标，
+                  // 让用户明确知道「正在准备」而非「按钮坏了」
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  )
+                else
+                  Icon(
+                    Icons.play_arrow,
+                    size: 20,
+                    color: scheme.onPrimaryContainer,
+                  ),
                 const SizedBox(width: 6),
                 Text(
                   _fabLabel,
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w600,
-                    color: scheme.onPrimaryContainer,
+                    color: scheme.onPrimaryContainer.withValues(
+                      alpha: ready ? 1 : 0.6,
+                    ),
                   ),
                 ),
               ],
@@ -255,10 +275,11 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
   /// - 若用户在选集中手动选过章节（_selectedChapter 非默认续读项），播放该话；
   /// - 否则按上次进度续读；无记录则第 1 话第 1 页。
   Future<void> _enterReading() async {
-    if (_info == null) {
-      await _load();
-      if (!mounted) return;
-    }
+    // 章节还没加载完 → 这里不该被触发（按钮此时是禁用态）。
+    // 之前是「先 await _load() 再跳转」，用户点了没反应、
+    // 直到加载完成才突然跳走 —— 现在改成按钮禁用，
+    // 点击要么立即跳，要么明确不可点。
+    if (_info == null) return;
     final chapters = _info?.chapters ?? const <Chapter>[];
     if (chapters.isEmpty) return;
 
@@ -266,7 +287,7 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
 
     // 用户主动选了某话 → 播该话
     if (_userPickedChapter) {
-      _openReader(_selectedChapter);
+      await _openReader(_selectedChapter);
       return;
     }
 
@@ -280,7 +301,7 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         page = last.page < 1 ? 1 : last.page;
       }
     }
-    _openReader(chapterIndex, startPage: page);
+    await _openReader(chapterIndex, startPage: page);
   }
 
   /// 点击作者：按作者名搜索作品。
@@ -380,7 +401,7 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
     }
   }
 
-  void _openReader(int index, {int startPage = 1}) {
+  Future<void> _openReader(int index, {int startPage = 1}) async {
     final chapters = _info?.chapters ?? const <Chapter>[];
     if (chapters.isEmpty) return;
     // 离线模式：优先打开已下载的该章（本地文件），不发起网络请求。
@@ -391,7 +412,7 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
       unawaited(_openLocal(ch, startPage: startPage));
       return;
     }
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => UnifiedReaderPage(
           source: widget.source,
@@ -403,6 +424,19 @@ class _UnifiedDetailPageState extends State<UnifiedDetailPage> {
         ),
       ),
     );
+    // **阅读器返回后刷新本页状态**（只是 setState 重建 UI，
+    // 不会重新拉取元数据 —— _load() 只在 initState 里调用）。
+    //
+    // 之前这里没有 await，push 后立刻走完 —— 用户在阅读器里翻到
+    // 第 3 话再退出，详情页不重建：章节列表选中的还是进去前那一话、
+    // FAB 文案还是「开始阅读」。这两处都读 AppState.lastReadFor()，
+    // 数据变了但没人通知 UI。
+    if (!mounted) return;
+    final last = AppState.instance.lastReadFor(_comic.id);
+    if (last == null) return;
+    final i = chapters.indexWhere((c) => c.id == last.chapterId);
+    if (i < 0) return;
+    setState(() => _selectedChapter = i);
   }
 
   /// 打开本地已下载章节。

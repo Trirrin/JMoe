@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import '../core/models.dart';
 import 'unified_detail_page.dart';
 import 'package:flutter/services.dart';
-import '../core/nav_bar_state.dart';
-import '../core/nav_metrics.dart';
 
 import 'unified_categories_page.dart';
 import 'unified_home_page.dart';
@@ -11,6 +9,7 @@ import 'library_page.dart';
 import 'settings_page.dart';
 import 'reader_data_page.dart';
 import '../core/app_state.dart';
+import '../core/l10n.dart';
 import '../widgets/detail_route.dart';
 
 /// 底部导航宿主。
@@ -46,22 +45,10 @@ class _MainPageState extends State<MainPage>
   /// 本页 route 的 secondaryAnimation（详情页进出时 0↔1）
   Animation<double>? _secondary;
 
-  /// 导航栏的 OverlayPortal 控制器（用于压住 Hero 飞行层）
-  final _navOverlay = OverlayPortalController();
-
   void _onSecondaryChanged() {
     if (!mounted) return;
-    // 详情页开始 push 时 secondaryAnimation 从 0 上升 → 导航栏此时
-    // 必须立刻隐藏（否则飞行过程中底部还留一条导航栏）。
-    // pop 回到 0 时恢复显示。
-    final sec = _secondary?.value ?? 0;
-    final top = sec < 0.001;
-    if (NavBarState.instance.visible != top) {
-      NavBarState.instance.update(visible: top);
-    }
     setState(() {});
   }
-
   static final _pages = <Widget>[
     const UnifiedHomePage(),
     UnifiedCategoriesPage(key: UnifiedCategoriesPage.catalogKey),
@@ -70,32 +57,9 @@ class _MainPageState extends State<MainPage>
     const SettingsPage(),
   ];
 
-  /// 本页是否是当前栈顶路由。
-  ///
-  /// 只有当主界面在栈顶时才显示导航栏；push 了详情页/阅读器等之后，
-  /// 导航栏必须隐藏（否则详情页底部会多出一条导航栏）。
-  bool get _isTopRoute {
-    final r = ModalRoute.of(context);
-    return r?.isCurrent ?? true;
-  }
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // 主界面可见 → 显示全局导航栏，并把点击回调交出去。
-    //
-    // 导航栏渲染在 MaterialApp.builder 的 Stack 里（Navigator 之外），
-    // 层级高于 Hero 飞行层，从而能挡住飞过的封面。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      NavBarState.instance.update(
-        index: _index,
-        // 只要本页还有别的东西盖在上面（详情页等 push 进来的路由），
-        // 就不显示导航栏 —— 否则详情页下面会同时出现一条导航栏。
-        visible: _isTopRoute,
-        onSelect: _onSelect,
-      );
-    });
     // 监听 route 的 secondaryAnimation（详情页进出时变化），
     // 这样 Hero 飞行期间页面能持续重建 —— 落位瞬间才能把旧页隐藏掉。
     final sec = ModalRoute.of(context)?.secondaryAnimation;
@@ -103,12 +67,6 @@ class _MainPageState extends State<MainPage>
       _secondary?.removeListener(_onSecondaryChanged);
       _secondary = sec;
       sec.addListener(_onSecondaryChanged);
-    }
-    // 导航栏通过 OverlayPortal 挂在 Overlay 顶层，需要显式显示。
-    if (!_navOverlay.isShowing) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_navOverlay.isShowing) _navOverlay.show();
-      });
     }
     // 应用「启动默认页」设置（仅一次）
     if (!_initialTabApplied) {
@@ -189,18 +147,16 @@ class _MainPageState extends State<MainPage>
   }
 
   Future<void> _onSelect(int i) async {
-    if (i == _index || _animating) return;
-    // 允许立即切换（用户要求「就是要切」）。
+    // 动画播放期间**不接受新的切换**（用户要求改回原行为）。
     //
-    // 闪烁由 _buildPageStack 里的「Hero 未落位则保留旧页」解决，
-    // 不需要在这里拦截或排队。
+    // 之前试过「允许打断、从中途继续推进」，但快速连点时
+    // 页面会连续横移、视觉上很乱，反而不如等一次动画播完。
+    if (i == _index || _animating) return;
     setState(() {
       _prevIndex = _index;
       _index = i;
       _animating = true;
     });
-    // 同步给全局导航栏（它渲染在 Navigator 之外，用来遮挡 Hero 飞行层）
-    NavBarState.instance.update(index: i, onSelect: _onSelect);
     await _ctrl.forward(from: 0);
     if (!mounted) return;
     setState(() => _animating = false);
@@ -238,6 +194,16 @@ class _MainPageState extends State<MainPage>
         // 不会重新走启动页。
         SystemNavigator.pop(animated: true);
       },
+      // 导航栏：单一实例，放在 Scaffold.bottomNavigationBar。
+      //
+      // 高度由 Scaffold 自己算 → 位置永远正确，不会「高出一头」，
+      // 并且始终可点击。
+      //
+      // 已知限制：页面转场时封面 Hero 会从导航栏上方掠过（不遮挡）。
+      // Hero 飞行层画在 Navigator 的 Overlay 里，层级高于 Scaffold
+      // 的任何内容，从应用层无法可靠地盖住它 —— 试过 OverlayPortal、
+      // 手写 Overlay.insert、逐帧抢位、第三方 above_hero 均无效，
+      // 已放弃该效果，优先保证导航栏位置与交互正确。
       child: Scaffold(
         body: ClipRect(
           child: AnimatedBuilder(
@@ -245,16 +211,44 @@ class _MainPageState extends State<MainPage>
             builder: (context, _) => _buildPageStack(),
           ),
         ),
-        // 导航栏**不在这里渲染**（见 GlobalNavBar）。
-        //
-        // 占位高度必须与 GlobalNavBar 的**总高度**完全一致：
-        //   NavigationBar 自身 64（主题 navigationBarTheme.height）
-        //   + 底部安全区（手势条）
-        // 少算就会让页面内容延伸到导航栏下方并露出来。
-        bottomNavigationBar: SizedBox(
-          height: NavMetrics.totalHeight(context),
-        ),
+        bottomNavigationBar: _buildNavBar(),
       ),
+    );
+  }
+
+  Widget _buildNavBar() {
+    return NavigationBar(
+      selectedIndex: _index,
+      onDestinationSelected: _onSelect,
+      animationDuration: const Duration(milliseconds: 200),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      destinations: [
+        NavigationDestination(
+          icon: const Icon(Icons.explore_outlined),
+          selectedIcon: const Icon(Icons.explore),
+          label: L.t('tabDiscover'),
+        ),
+        NavigationDestination(
+          icon: const Icon(Icons.grid_view_outlined),
+          selectedIcon: const Icon(Icons.grid_view),
+          label: L.t('tabCategories'),
+        ),
+        NavigationDestination(
+          icon: const ShelfIcon(filled: false),
+          selectedIcon: const ShelfIcon(filled: true),
+          label: L.t('tabShelf'),
+        ),
+        NavigationDestination(
+          icon: const Icon(Icons.insights_outlined),
+          selectedIcon: const Icon(Icons.insights),
+          label: L.t('tabStats'),
+        ),
+        NavigationDestination(
+          icon: const Icon(Icons.settings_outlined),
+          selectedIcon: const Icon(Icons.settings),
+          label: L.t('tabSettings'),
+        ),
+      ],
     );
   }
 

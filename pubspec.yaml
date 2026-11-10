@@ -4,10 +4,10 @@ repository: https://github.com/liuyuexiaoyu1/jmoe
 homepage: https://github.com/liuyuexiaoyu1
 license: MIT
 publish_to: 'none'
-version: 1.4.0+3
+version: 1.5.0+4
 
 environment:
-  sdk: ^3.13.7
+  sdk: '>=3.13.5 <4.0.0'
 
 dependencies:
   flutter:
@@ -25,6 +25,8 @@ dependencies:
   photo_view: ^0.15.0
   url_launcher: ^6.3.2
   image: ^4.8.0
+  # 本地下载用无加密 zip 打包（分享时才用 .jmoe 加密格式）
+  archive: ^4.0.7
   pointycastle: ^4.0.0
 
 dev_dependencies:
@@ -36,6 +38,8 @@ flutter:
   uses-material-design: true
   assets:
     - assets/i18n/
+    # 应用图标（登录页 / 关于页展示用，与桌面图标同源）
+    - assets/icon/
 
 # 锁定插件版本：path_provider_android 2.3.0+ 与 shared_preferences_android 2.5.0+
 # 通过 jni/jni_flutter 引入原生 C 代码，构建时需要 CMake 与 NDK。

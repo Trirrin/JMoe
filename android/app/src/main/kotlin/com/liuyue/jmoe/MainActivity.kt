@@ -410,11 +410,40 @@ class MainActivity : FlutterActivity() {
         // 的默认首页，用户看到的就是「打开了但没跳过去」。
         val targetUri = buildDocUri(file)
 
-        // 方案 1：DocumentsUI 的「浏览」入口 + 初始 URI（最标准）
+        // 方案 1：**直接跳转到该目录**（不是让用户选目录）。
+        //
+        // 之前这里用 ACTION_OPEN_DOCUMENT_TREE —— 那是「选择一个目录」
+        // 的选择器（返回 result 给调用方），所以用户看到的是
+        // 「选取目录」界面，而且不会真的跳到目标位置。
+        //
+        // 用户要的是「打开所在位置」。正确做法是用 ACTION_VIEW 打开
+        // DocumentsUI 的根 + EXTRA_INITIAL_URI 定位到目标目录。
         try {
-            val i = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            val i = Intent(Intent.ACTION_VIEW).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (targetUri != null) {
+                    setDataAndType(
+                        targetUri,
+                        android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+                    )
+                    putExtra("android.provider.extra.INITIAL_URI", targetUri)
+                }
+            }
+            startActivity(i)
+            return true
+        } catch (_: Throwable) {
+        }
+
+        // 方案 1b：DocumentsUI 显式组件 + 初始 URI（跳到目录而非选目录）
+        try {
+            val i = Intent(Intent.ACTION_VIEW).apply {
+                setPackage("com.android.documentsui")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (targetUri != null) {
+                    setDataAndType(
+                        targetUri,
+                        android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+                    )
                     putExtra("android.provider.extra.INITIAL_URI", targetUri)
                 }
             }

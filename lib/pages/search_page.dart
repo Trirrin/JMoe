@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/app_state.dart';
@@ -277,6 +278,10 @@ class _SearchPageState extends State<SearchPage>
     String? query,
     bool reset = true,
     bool asTag = false,
+    /// 是否在搜索后保持输入框焦点（不收起键盘）。
+    ///
+    /// 删除胶囊时用 true：用户还在输入区操作，键盘不该被收走。
+    bool keepFocus = false,
   }) async {
     final raw = query ?? _controller.text.trim();
     if (raw.isEmpty) return;
@@ -349,6 +354,14 @@ class _SearchPageState extends State<SearchPage>
         await _searchAnime(query: q, reset: reset);
       case SearchKind.novel:
         await _searchNovel(q);
+    }
+
+    // 请求保持焦点：搜索过程里的 setState 有可能让输入框失焦，
+    // 这里在结果回来后把焦点还回去（键盘不会收起）。
+    if (keepFocus && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_focus.hasFocus) _focus.requestFocus();
+      });
     }
   }
 
@@ -659,14 +672,42 @@ class _SearchPageState extends State<SearchPage>
                         color: scheme.onSurfaceVariant,
                       ),
                       const SizedBox(width: 8),
-                      // 已锁定的标签 → 多个胶囊（始终存在，键盘收起也在）
-                      for (final tag in _tags) ...[
-                        _inlineTagChip(tag),
+                      // 已锁定的标签 → 多个胶囊（恢复原来的独立控件样式）
+                      for (var ti = 0; ti < _tags.length; ti++) ...[
+                        _inlineTagChip(_tags[ti], ti),
                         const SizedBox(width: 4),
                       ],
-                      // TextField 始终存在 → 光标始终可见
                       Expanded(
-                        child: TextField(
+                        // 用 Focus.onKeyEvent 而**不是** Shortcuts/Actions：
+                        //
+                        // Shortcuts+Actions 一旦匹配就会把按键"消费"掉，
+                        // 原生 TextField 再也收不到退格 —— 于是
+                        // 「把胶囊变成文字后，剩下的文字删不掉」。
+                        //
+                        // Focus.onKeyEvent 可以返回 KeyEventResult.ignored，
+                        // 把事件继续向下传，原生退格就能正常工作。
+                        child: Focus(
+                          onKeyEvent: (node, event) {
+                            if (event is! KeyDownEvent &&
+                                event is! KeyRepeatEvent) {
+                              return KeyEventResult.ignored;
+                            }
+                            if (event.logicalKey !=
+                                LogicalKeyboardKey.backspace) {
+                              return KeyEventResult.ignored;
+                            }
+                            // 只有真的处理了胶囊才拦截，其余一律放行
+                            return _onBackspace()
+                                ? KeyEventResult.handled
+                                : KeyEventResult.ignored;
+                          },
+                          child: TextField(
+                          // 稳定 key：删除/新增胶囊时前面的兄弟节点数量会变，
+                          // 没有 key 的话 Flutter 可能把 TextField 的 Element
+                          // 复用到别的位置，导致它被重建 → 丢焦点 → 键盘收起。
+                          // 有了固定 key，它永远绑定同一个 Element，
+                          // 焦点和键盘都不会被影响。
+                          key: const ValueKey('search_input_field'),
                           controller: _controller,
                           focusNode: _focus,
                           textInputAction: TextInputAction.search,
@@ -698,9 +739,9 @@ class _SearchPageState extends State<SearchPage>
                             ),
                           ),
                           onChanged: (_) => setState(() {}),
+                            ),
+                          ),
                         ),
-                      ),
-                      // 清空按钮
                       if (_controller.text.isNotEmpty)
                         GestureDetector(
                           onTap: () {
@@ -745,54 +786,258 @@ class _SearchPageState extends State<SearchPage>
 
   /// 输入框内的标签胶囊（#tag ×）。点击 × 移除该标签。
   /// 输入框内的标签胶囊：真胶囊形（大圆角）+ 更大的点击区域。
-  Widget _inlineTagChip(String tag) {
+  /// 正在被编辑的胶囊序号（null = 没有在编辑）。
+  ///
+  /// 用户要求「一次最多只能更改一个胶囊」—— 用单个索引即可保证。
+  int? _editingTagIndex;
+
+  /// 编辑胶囊时的临时输入框控制器
+  TextEditingController? _tagEditCtrl;
+
+  /// 让某个胶囊进入「编辑态」（胶囊拆散成文字）。
+  ///
+  /// 用户要求：**像删除一样直接拆散** —— 点一下胶囊它就不再是胶囊，
+  /// 而是变成输入框里的普通文字，可以随时改、随时退格。
+  ///
+  /// 同一时间只能有一个胶囊处于编辑态：
+  /// 正在编辑 A 又点了 B 时，先把 A 的文字变回胶囊，再让 B 变成文字。
+  void _beginEditTag(int index) {
+    if (index < 0 || index >= _tags.length) return;
+
+    // 已有别的胶囊在编辑 → 先把它提交（变回胶囊）。
+    // 注意：提交只改写文字/或删除空项，不改变已有索引顺序，
+    // 所以这里直接用原 index 继续即可。
+    if (_editingTagIndex != null && _editingTagIndex != index) {
+      _commitEditTagQuiet();
+      if (index >= _tags.length) return;
+    }
+
+    _tagEditCtrl?.dispose();
+    _tagEditCtrl = TextEditingController(text: _tags[index]);
+    _tagEditCtrl!.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _tags[index].length,
+    );
+    setState(() => _editingTagIndex = index);
+  }
+
+  /// 提交当前编辑但不触发重新搜索（用于切换编辑目标时）。
+  void _commitEditTagQuiet() {
+    final i = _editingTagIndex;
+    final ctrl = _tagEditCtrl;
+    if (i == null || ctrl == null) return;
+    final v = ctrl.text.trim();
+    if (i < _tags.length) {
+      if (v.isEmpty) {
+        _tags.removeAt(i);
+      } else {
+        _tags[i] = v;
+      }
+    }
+    ctrl.dispose();
+    _tagEditCtrl = null;
+    _editingTagIndex = null;
+  }
+
+  /// 结束编辑并应用。
+  ///
+  /// 规则（按用户要求）：
+  ///  * 有内容 → 写回该胶囊（搜索时自动变回胶囊）
+  ///  * 清空后确认 → **整个胶囊删掉，文字也不保留**
+  ///  * 一次只编辑一个胶囊
+  void _commitEditTag() {
+    final i = _editingTagIndex;
+    final ctrl = _tagEditCtrl;
+    if (i == null || ctrl == null) return;
+    final v = ctrl.text.trim();
+    setState(() {
+      if (v.isEmpty) {
+        // 文字清空 → 胶囊一并删除，不把文字留在输入框里
+        if (i < _tags.length) _tags.removeAt(i);
+      } else if (i < _tags.length) {
+        _tags[i] = v;
+      }
+      _editingTagIndex = null;
+    });
+    ctrl.dispose();
+    _tagEditCtrl = null;
+    if (_tags.isNotEmpty) {
+      _search(asTag: true);
+    } else {
+      setState(() {
+        _tagMode = false;
+        _lastQuery = '';
+        _clearResults();
+      });
+    }
+  }
+
+  /// 退格键处理。
+  ///
+  /// 用户要求的完整规则：
+  ///  1. 若**已有胶囊处于「文字编辑态」** → 先把它变回胶囊（本次退格只做这一件事）
+  ///  2. 否则：把最后一个胶囊取出、变成输入框里的**可编辑文字**，
+  ///     并立即删掉它的最后一个字；之后继续退格就是正常的逐字删除
+  ///
+  /// 关键：这个拦截器**只在真的要处理胶囊时才拦截**，
+  /// 其他情况必须返回 false，把退格交还给原生 TextField。
+  ///
+  /// 之前无条件拦下所有退格（`if (_controller.text.isNotEmpty) return;`
+  /// 之后仍然被 Shortcuts 吃掉），导致「取出胶囊后剩下的文字删不掉」。
+  bool _onBackspace() {
+    // 输入框有内容 → 完全不干预，交给原生逐字删除
+    if (_controller.text.isNotEmpty) return false;
+    // 没有胶囊可处理 → 也不干预
+    if (_tags.isEmpty && _editingTagIndex == null) return false;
+
+    // 步骤 1：有正在编辑的胶囊 → 先变回胶囊
+    if (_editingTagIndex != null) {
+      _commitEditTag();
+      return true;
+    }
+
+    // 步骤 2：取出最后一个胶囊 → 变成输入框文字 → 删掉最后一个字
+    final last = _tags.removeLast();
+    final remain = last.length > 1 ? last.substring(0, last.length - 1) : '';
+    setState(() {});
+    _controller.text = remain;
+    _controller.selection = TextSelection.collapsed(offset: remain.length);
+    // 剩余为空说明删完了，退出标签模式
+    if (remain.isEmpty) {
+      setState(() {
+        _tagMode = _tags.isNotEmpty;
+        if (_tags.isEmpty) {
+          _lastQuery = '';
+          _clearResults();
+        }
+      });
+    }
+    return true;
+  }
+
+  /// 输入框内的标签胶囊。
+  ///
+  /// 普通态：胶囊外观（可双击进入文字编辑）
+  /// 编辑态：变成可直接输入的文本框
+  Widget _inlineTagChip(String tag, int index) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      // 上下留白更大 → 更饱满
-      padding: const EdgeInsets.fromLTRB(10, 5, 4, 5),
-      decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.15),
-        // 半径给足 → 真胶囊形而非圆角矩形
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '#$tag',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: scheme.primary,
-            ),
+    final editing = _editingTagIndex == index;
+
+    // 编辑态：胶囊变成可直接输入的文本框（用户的「胶囊变文字」）
+    if (editing) {
+      // **编辑态 = 普通文字**（不是"胶囊里放输入框"）。
+      //
+      // 用户要求：「编辑胶囊需要转换成文字」—— 双击胶囊后它就不再
+      // 是胶囊形状，而是变成一行可编辑的普通文本（无背景、无边框、
+      // 与输入框文字同样式），改完回车/失焦后再变回胶囊。
+      return IntrinsicWidth(
+        child: TextField(
+          // key 绑定索引：切到别的胶囊时是不同的 TextField，
+          // 各自 autofocus 会正确接管，不会两个同时抢焦点。
+          key: ValueKey('tag_edit_field_$index'),
+          controller: _tagEditCtrl,
+          autofocus: true,
+          style: TextStyle(
+            fontSize: 13.5,
+            color: scheme.onSurface,
           ),
-          const SizedBox(width: 2),
-          // X 按钮：扩大热区到 22×22，便于点击
-          InkResponse(
-            onTap: () {
-              setState(() => _tags.remove(tag));
-              if (_tags.isNotEmpty) {
-                _search(asTag: true);
-              } else {
-                setState(() {
-                  _tagMode = false;
-                  _lastQuery = '';
-                  _clearResults();
-                });
-              }
-            },
-            radius: 14,
-            child: SizedBox(
-              width: 22,
-              height: 22,
-              child: Icon(
-                Icons.close_rounded,
-                size: 15,
+          decoration: const InputDecoration(
+            isDense: true,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+            isCollapsed: true,
+          ),
+          onSubmitted: (_) => _commitEditTag(),
+          onTapOutside: (_) => _commitEditTag(),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      // 单击胶囊 → **直接拆散成文字**进入编辑（用户要求：
+      // 「像删除一样直接拆散就可以编辑了」）。
+      // 只有右侧 × 负责删除，点胶囊本体就是编辑。
+      onTap: () => _beginEditTag(index),
+      child: Container(
+        // 上下留白更大 → 更饱满
+        padding: const EdgeInsets.fromLTRB(10, 5, 4, 5),
+        decoration: BoxDecoration(
+          color: scheme.primary.withValues(alpha: 0.15),
+          // 半径给足 → 真胶囊形而非圆角矩形
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '#$tag',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
                 color: scheme.primary,
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 2),
+            // X 按钮：扩大热区到 22×22，便于点击
+            InkResponse(
+              onTap: () {
+                // 记下删除前是否持有焦点，用于删除后精确恢复
+                final hadFocus = _focus.hasFocus;
+
+                setState(() {
+                  _tags.removeAt(index);
+                  // 删掉的正是正在编辑的那个 → 退出编辑态
+                  if (_editingTagIndex == index) {
+                    _editingTagIndex = null;
+                    _tagEditCtrl?.dispose();
+                    _tagEditCtrl = null;
+                  } else if (_editingTagIndex != null &&
+                      _editingTagIndex! > index) {
+                    _editingTagIndex = _editingTagIndex! - 1;
+                  }
+                });
+
+                // **删除胶囊不该收起键盘。**
+                //
+                // 关键改动：删除后不再走 `_search()`。
+                // `_search` 内部会连续做多次 setState（改 _tagMode、
+                // _lastQuery、清结果、再填结果），连续的树重建会让
+                // TextField 在某一帧失焦 —— 键盘随即收起。
+                //
+                // 现在改用 `_resubmit()`：它用「当前关键词原样重跑」，
+                // 只更新结果列表，完全不碰输入区的状态。
+                if (_tags.isNotEmpty) {
+                  _resubmit();
+                } else {
+                  setState(() {
+                    _tagMode = false;
+                    _lastQuery = '';
+                    _clearResults();
+                  });
+                }
+
+                // 立即恢复焦点（同一帧），下一帧再确认一次 ——
+                // 双保险，确保键盘不会闪一下再弹出。
+                if (hadFocus && mounted) _focus.requestFocus();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted && hadFocus) _focus.requestFocus();
+                });
+              },
+              radius: 14,
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 15,
+                  color: scheme.primary,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -866,32 +1111,19 @@ class _SearchPageState extends State<SearchPage>
             required String value,
             required ValueChanged<String> onPick,
             VoidCallback? onAfter,
+            Key? key,
           }) {
-            return Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: options
-                  .map(
-                    (o) => ChoiceChip(
-                      label: Text(
-                        o.$2,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      visualDensity: VisualDensity.compact,
-                      selected: value == o.$1,
-                      onSelected: (_) {
-                        // 关键：**一次 setState 里完成所有修改**。
-                        // 之前先 setS(onPick) 再单独 setS 清月份 —— 两次
-                        // 重建之间会出现「已选中新值但月份还是旧值」的中间态，
-                        // 用户看到整排 chip 闪一下。
-                        setS(() {
-                          onPick(o.$1);
-                          onAfter?.call();
-                        });
-                      },
-                    ),
-                  )
-                  .toList(),
+            // _ChipRow 是无动画自绘组件：切换时没有内部动画可重播，
+            // 所以可以让面板正常 setS 重建（不需要额外的局部状态）。
+            return _ChipRow(
+              key: key,
+              options: options,
+              value: value,
+              onPick: (v) {
+                setS(() => onPick(v));
+                onAfter?.call();
+              },
+              onAfter: null,
             );
           }
 
@@ -973,13 +1205,18 @@ class _SearchPageState extends State<SearchPage>
                           onPick: (v) => draftYear = v,
                           // 选「年份不限」时把月份一起清掉，
                           // 免得出现「不限年 + 3 月」这种无意义组合。
-                          // 与 onPick 在同一次 setState 内完成，不闪。
                           onAfter: () {
                             if (draftYear.isEmpty) draftMonth = '';
+                            // 月份那排是独立 State，必须显式重建它
+                            // 才能反映「被联动清空」的结果。
+                            setS(() {});
                           },
                         ),
                         label(L.t('monthLabel')),
                         chips(
+                          // key 绑定 draftYear：年份一变，月份行重建，
+                          // 从而正确显示被清空后的选中态。
+                          key: ValueKey('month_row_$draftYear'),
                           value: draftMonth,
                           options: [
                             for (final m in months)
@@ -1011,12 +1248,15 @@ class _SearchPageState extends State<SearchPage>
                           _year = draftYear;
                           _month = draftMonth;
                           if (typeChanged) {
-                            // 「作者」与「作品」等检索方式共用同一网格，
-                            // 只改 search_type，不换板块
+                            // 只改 search_type，**不换板块**。
+                            //
+                            // 顶部已去掉「作者」分类（只保留漫画/动漫/小说
+                            // 三大类），所以这里绝不能把 _kind 设成
+                            // SearchKind.author —— 那会让三大类全都不高亮
+                            // （用户反馈的「搜索方式消失、三大类都不选中」）。
+                            // 作者检索就是「漫画按作者搜」，仍属漫画板块。
                             _searchType = draftType;
-                            _kind = draftType == 'author'
-                                ? SearchKind.author
-                                : SearchKind.comic;
+                            _kind = SearchKind.comic;
                           }
                         });
                         _resubmit();
@@ -1080,10 +1320,12 @@ class _SearchPageState extends State<SearchPage>
       padding: const EdgeInsets.only(bottom: 2),
       child: Row(
         children: [
-          // 作者检索并入漫画这一行（与官方 search_type=author 一致），
-          // 不再藏进筛选面板 —— 4 个选项平铺，一眼可见。
+          // 只保留**三大类**：漫画 / 动漫 / 小说。
+          //
+          // 作者检索不再作为顶部分类：它本质是「漫画按作者检索」，
+          // 已并入漫画板块（筛选面板里可选检索方式）。
+          // 顶部平铺 4 项会让用户误以为作者是独立内容类型。
           tab(SearchKind.comic, L.t('searchComic')),
-          tab(SearchKind.author, L.t('searchAuthor')),
           tab(SearchKind.anime, L.t('anime')),
           tab(SearchKind.novel, L.t('novels')),
         ],
@@ -1212,8 +1454,22 @@ class _SearchPageState extends State<SearchPage>
             coverOf: _source.coverOf,
             loadingCount: _comicMore ? 3 : 0,
             onTap: (c) async {
+              // 跳转前收起键盘并清掉编辑态。
+              //
+              // 否则从详情页返回时会**再次弹出输入法**：
+              // 搜索框的 FocusNode 仍持有焦点，页面重新可见后
+              // Flutter 会恢复它，键盘就自己弹出来了。
+              // 若此时还有胶囊处于编辑态（autofocus TextField），
+              // 情况更明显。这里统一先失焦 + 退出编辑态。
+              _focus.unfocus();
+              if (_editingTagIndex != null) {
+                _tagEditCtrl?.dispose();
+                _tagEditCtrl = null;
+              }
               _pendingFabTag = 'fab_${_source.id}_${c.id}';
-              setState(() {});
+              setState(() {
+                _editingTagIndex = null;
+              });
               await Navigator.of(context).push(
                 detailRoute(builder: (_) => UnifiedDetailPage(
                     source: _source,
@@ -1460,6 +1716,76 @@ class _SearchChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 筛选面板里的一排选项 chip。
+///
+/// # 为什么自绘而不用 ChoiceChip
+///
+/// ChoiceChip 的选中态切换带 200ms 内部动画（对勾缩放 + 背景渐变）。
+/// 放在 `showModalBottomSheet` 的 `StatefulBuilder` 里时，任何一次
+/// `setS` 都会重建整块面板 —— 十几个 chip 的 Element 重新挂载，
+/// 动画全部从初始态重播 → 用户看到的「切换排序时整排闪一下」。
+///
+/// 换成**无动画自绘**：背景色/边框/文字色直接由选中态决定，
+/// 没有中间帧可闪。外观与原来的 ChoiceChip 保持一致。
+class _ChipRow extends StatelessWidget {
+  const _ChipRow({
+    super.key,
+    required this.options,
+    required this.value,
+    required this.onPick,
+    required this.onAfter,
+  });
+
+  final List<(String, String)> options;
+  final String value;
+  final ValueChanged<String> onPick;
+  final VoidCallback? onAfter;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: options.map((o) {
+        final sel = value == o.$1;
+        return Material(
+          color: sel
+              ? scheme.secondaryContainer
+              : scheme.surfaceContainerHighest,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () {
+              if (sel) return;
+              onPick(o.$1);
+              onAfter?.call();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 7,
+              ),
+              child: Text(
+                o.$2,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: sel
+                      ? scheme.onSecondaryContainer
+                      : scheme.onSurfaceVariant,
+                  fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }

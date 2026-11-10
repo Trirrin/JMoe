@@ -1,0 +1,13 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "JMoe 主模块" },
+    { "name": "EntryAbility_desc", "value": "JMoe 漫画客户端" },
+    { "name": "EntryAbility_label", "value": "JMoe" },
+    { "name": "permission_internet_reason", "value": "加载漫画、小说与视频内容" },
+    { "name": "permission_network_reason", "value": "检测网络状态以选择最快线路" },
+    { "name": "permission_background_reason", "value": "后台下载漫画时保持运行" },
+    { "name": "permission_notify_reason", "value": "关注作品更新时发送通知" },
+    { "name": "permission_media_reason", "value": "读取本地保存的漫画文件" },
+    { "name": "permission_media_write_reason", "value": "保存下载的漫画到设备" }
+  ]
+}

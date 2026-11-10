@@ -687,45 +687,6 @@ class _StartupHostPageState extends State<StartupHostPage> {
               ),
               const SizedBox(width: 8),
               _latencyBadge(scheme, r),
-              // 固定这条线路：之后启动直接进，不再看启动页
-              const SizedBox(width: 2),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: L.t('pinThisHost'),
-                icon: Icon(
-                  HostStore.instance.pinnedHost == r.host
-                      ? Icons.push_pin_rounded
-                      : Icons.push_pin_outlined,
-                  size: 17,
-                  color: HostStore.instance.pinnedHost == r.host
-                      ? scheme.primary
-                      : scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                ),
-                onPressed: r.ok
-                    ? () async {
-                        final store = HostStore.instance;
-                        final already = store.pinnedHost == r.host;
-                        if (already) {
-                          await store.setPinned('');
-                          await store.setSkipStartup(false);
-                        } else {
-                          await store.setPinned(r.host);
-                          await store.setSkipStartup(true);
-                        }
-                        if (!mounted) return;
-                        setState(() {});
-                        AppToast.show(
-                          context,
-                          already
-                              ? L.t('unpinnedHost')
-                              : L.tp('pinnedHostDone', {'h': r.host}),
-                          icon: already
-                              ? Icons.push_pin_outlined
-                              : Icons.push_pin_rounded,
-                        );
-                      }
-                    : null,
-              ),
             ],
           ),
         ),

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../core/app_theme.dart';
 import '../core/downloader.dart';
@@ -28,19 +29,43 @@ enum DownloadSort {
 /// 顶部有一行引导，告诉用户「点章节进去看离线」——
 /// 之前没有任何提示，用户不知道点了会怎样。
 class DownloadsPage extends StatefulWidget {
-  const DownloadsPage({super.key});
+  const DownloadsPage({super.key, this.embedded = false});
+
+  /// 是否作为 Tab 内容嵌入 [DownloadsHubPage]。
+  ///
+  /// true 时不渲染自己的 Scaffold/AppBar（外层已有），
+  /// 排序与清空按钮移到页面顶部的一行工具条里。
+  final bool embedded;
 
   @override
-  State<DownloadsPage> createState() => _DownloadsPageState();
+  State<DownloadsPage> createState() => DownloadsPageState();
 }
 
-class _DownloadsPageState extends State<DownloadsPage> {
+class DownloadsPageState extends State<DownloadsPage> {
   Timer? _ticker;
 
   /// 排序方式：
   ///  * [DownloadSort.name] 默认，按名称排序（作品与选集都按名称）
   ///  * [DownloadSort.time] 按下载时间排序（作品与选集都用下载时间）
   DownloadSort _sort = DownloadSort.name;
+
+  // ---- 供 DownloadsHubPage 的操作按钮使用 ----
+
+  /// 当前排序方式
+  DownloadSort get sortMode => _sort;
+
+  /// 是否有已完成项（决定「清空」按钮是否显示）
+  bool get hasCompleted =>
+      ChapterDownloader.allTasks.any((t) => t.done);
+
+  /// 切换排序
+  void setSort(DownloadSort v) {
+    if (v == _sort) return;
+    setState(() => _sort = v);
+  }
+
+  /// 清空已完成项（带确认对话框）
+  void clearCompleted() => _onClear(Theme.of(context));
 
   @override
   void initState() {
@@ -111,39 +136,40 @@ class _DownloadsPageState extends State<DownloadsPage> {
     );
     final done = _sorted(tasks.where((t) => t.done).toList());
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(L.t('myDownloads')),
-        actions: [
-          // 排序切换
-          PopupMenuButton<DownloadSort>(
-            initialValue: _sort,
-            tooltip: L.t('sort'),
-            icon: const Icon(Icons.sort_rounded),
-            onSelected: (v) {
-              if (v == _sort) return;
-              setState(() => _sort = v);
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: DownloadSort.name,
-                child: Text(L.t('sortByName')),
-              ),
-              PopupMenuItem(
-                value: DownloadSort.time,
-                child: Text(L.t('sortByDownloadTime')),
-              ),
-            ],
-          ),
-          if (done.isNotEmpty)
-            IconButton(
-              tooltip: L.t('clear'),
-              icon: const Icon(Icons.cleaning_services_outlined),
-              onPressed: () => _onClear(theme),
+    // 排序与清空（嵌入模式由 DownloadsHubPage 放在 Tab 栏右侧，
+    // 独立模式放 AppBar）。
+    final toolbar = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PopupMenuButton<DownloadSort>(
+          initialValue: _sort,
+          tooltip: L.t('sort'),
+          icon: const Icon(Icons.sort_rounded, size: 20),
+          onSelected: (v) {
+            if (v == _sort) return;
+            setState(() => _sort = v);
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: DownloadSort.name,
+              child: Text(L.t('sortByName')),
             ),
-        ],
-      ),
-      body: RefreshIndicator(
+            PopupMenuItem(
+              value: DownloadSort.time,
+              child: Text(L.t('sortByDownloadTime')),
+            ),
+          ],
+        ),
+        if (done.isNotEmpty)
+          IconButton(
+            tooltip: L.t('clear'),
+            icon: const Icon(Icons.cleaning_services_outlined, size: 20),
+            onPressed: () => _onClear(theme),
+          ),
+      ],
+    );
+
+    final bodyContent = RefreshIndicator(
         onRefresh: () async {
           await ChapterDownloader.restoreFromDisk();
           if (mounted) setState(() {});
@@ -207,7 +233,23 @@ class _DownloadsPageState extends State<DownloadsPage> {
               ..._buildGroups(theme, done),
           ],
         ),
+    );
+
+    // 嵌入模式：不套 Scaffold（外层 DownloadsHubPage 已有），
+    // 排序/清空放到页面顶部一行工具条。
+    // 嵌入模式：直接返回内容（排序/清空由外层 DownloadsHubPage
+    // 放在 Tab 栏右侧，不再额外占一行 ——
+    // 之前多了一行工具条把整个列表往下推，用户反馈"整体下移了"）。
+    if (widget.embedded) {
+      return bodyContent;
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(L.t('myDownloads')),
+        actions: [toolbar],
       ),
+      body: bodyContent,
     );
   }
 
@@ -597,21 +639,6 @@ class _DownloadsPageState extends State<DownloadsPage> {
                   await _shareAsArchive(t);
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.vpn_key_rounded),
-                title: Text(L.t('archivePassword')),
-                subtitle: Text(
-                  ChapterDownloader.archivePassword,
-                  style: const TextStyle(fontSize: 11.5),
-                ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.copy_rounded, size: 16),
-                  onPressed: () {
-                    // 复制密码到剪贴板
-                    ChapterDownloader.copyPassword();
-                  },
-                ),
-              ),
             ],
             ListTile(
               leading: Icon(Icons.delete_outline_rounded, color: scheme.error),
@@ -644,7 +671,19 @@ class _DownloadsPageState extends State<DownloadsPage> {
     _showPackingDialog();
     final name = (t.chapterName.isEmpty ? t.albumName : t.chapterName)
         .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    final tmp = Directory('${Directory.systemTemp.path}/jmoe_share');
+    // 打包产物放在应用缓存目录（path_provider 的 getTemporaryDirectory）。
+    //
+    // 它在 Android 上返回 /data/user/0/<pkg>/cache，对应 file_paths.xml
+    // 里声明的 <cache-path>，FileProvider 一定能转成 content:// URI。
+    // 之前用 Directory.systemTemp，在部分 ROM 上得到的路径不在
+    // FileProvider 白名单内 → getUriForFile 抛异常 → 分享面板弹不出来。
+    Directory? tmp;
+    try {
+      final base = await getTemporaryDirectory();
+      tmp = Directory('${base.path}/jmoe_share');
+    } catch (_) {
+      tmp = Directory('${Directory.systemTemp.path}/jmoe_share');
+    }
     if (!tmp.existsSync()) tmp.createSync(recursive: true);
     final outPath = '${tmp.path}/$name.jmoe';
     final albumDir = File(dirPath).parent.path;
@@ -668,6 +707,11 @@ class _DownloadsPageState extends State<DownloadsPage> {
       chapterId: t.chapterId,
       outPath: outPath,
       albumMeta: albumMeta,
+      // 后台打包，进度通过 SendPort 回传到这里刷新 UI
+      onProgress: (done, total) {
+        _packDone.value = done;
+        _packTotal.value = total;
+      },
     );
     _dismissPackingDialog();
     if (!mounted) return;
@@ -680,30 +724,64 @@ class _DownloadsPageState extends State<DownloadsPage> {
     await ChapterDownloader.shareFile(packed.path);
   }
 
-  /// 打包进度对话框（可取消说明：这里只做提示，不能中途取消，
-  /// 因为中途取消会留下半个文件；但至少要告诉用户在做什么）。
+  /// 打包进度对话框。
+  ///
+  /// 文字**居中**（之前 Row + Expanded 会把文字顶到左上，
+  /// 用户看到「文字不在控件中居中」），并且显示真实页数进度。
   void _showPackingDialog() {
+    _packDone.value = 0;
+    _packTotal.value = 0;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => PopScope(
         canPop: false,
         child: AlertDialog(
-          content: Row(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(strokeWidth: 2.4),
               ),
-              const SizedBox(width: 14),
-              Expanded(child: Text(L.t('packingShare'))),
+              const SizedBox(height: 16),
+              Text(
+                L.t('packingShare'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              // 进度：xx / xx 页
+              ValueListenableBuilder<int>(
+                valueListenable: _packTotal,
+                builder: (context, total, _) => total <= 0
+                    ? const SizedBox.shrink()
+                    : ValueListenableBuilder<int>(
+                        valueListenable: _packDone,
+                        builder: (context, done, _) => Text(
+                          '$done / $total',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+              ),
             ],
           ),
         ),
       ),
     );
   }
+
+  /// 打包进度（后台打包时由 worker 回传）
+  final _packDone = ValueNotifier<int>(0);
+  final _packTotal = ValueNotifier<int>(0);
 
   void _dismissPackingDialog() {
     if (!mounted) return;

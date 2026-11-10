@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'pack_worker.dart';
 import 'package:crypto/crypto.dart';
 import 'package:pointycastle/api.dart' show KeyParameter, ParametersWithIV;
 import 'package:pointycastle/block/aes.dart';
@@ -75,6 +76,35 @@ class JmoeArchive {
     Map<String, dynamic>? albumMeta,
     void Function(int done, int total)? onProgress,
   }) async {
+    // **整个打包过程放到后台 isolate 执行。**
+    //
+    // 之前在主 isolate 上逐页 AES-CBC 加密，每页还
+    // `await Future.delayed(Duration.zero)` 让出事件循环 ——
+    // 几百页就是几百次调度 + 几百次同步加密，UI 明显卡住，
+    // 用户点「打包分享」时整个界面都在定格。
+    //
+    // 加密是纯计算，不依赖 UI/平台通道，天然适合扔到后台。
+    // 用常驻 worker（非 compute()，避免每章新建 isolate）。
+    return PackWorker.instance.pack(
+      chapterDir: chapterDir,
+      chapterId: chapterId,
+      outPath: outPath,
+      albumMeta: albumMeta,
+      onProgress: onProgress,
+    );
+  }
+
+  /// 供后台 isolate 调用：执行真正的打包。
+  ///
+  /// 与 [packDirectory] 逻辑相同，但**不做 isolate 调度** ——
+  /// 它本身就是被 worker 在后台调用的。
+  static Future<File?> packIsolate({
+    required String chapterDir,
+    required String chapterId,
+    required String outPath,
+    Map<String, dynamic>? albumMeta,
+    void Function(int done, int total)? onProgress,
+  }) async {
     RandomAccessFile? raf;
     try {
       final dir = Directory(chapterDir);
@@ -125,8 +155,9 @@ class JmoeArchive {
         await raf.writeFrom(_u32(enc.length));
         await raf.writeFrom(enc);
         onProgress?.call(i + 1, files.length);
-        // 每页让出一次事件循环，保证 UI 能刷新进度
-        await Future<void>.delayed(Duration.zero);
+        // 在后台 isolate 里跑，不需要让出事件循环给 UI；
+        // 保留一次微让出，让同一 isolate 的进度消息能及时发出。
+        if (i % 8 == 0) await Future<void>.delayed(Duration.zero);
       }
       await raf.flush();
       await raf.close();

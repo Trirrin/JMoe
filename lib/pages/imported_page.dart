@@ -57,7 +57,13 @@ class FilePickerChannel {
 ///  * 选中后复制到应用私有导入目录（保证长期可读）
 ///  * 列表里点条目直接阅读
 class ImportedPage extends StatefulWidget {
-  const ImportedPage({super.key});
+  const ImportedPage({super.key, this.embedded = false});
+
+  /// 是否作为 Tab 内容嵌入 [DownloadsHubPage]。
+  ///
+  /// true 时不渲染自己的 Scaffold/AppBar，
+  /// 「打开文件夹 / 导入」按钮移到页面顶部工具条。
+  final bool embedded;
 
   @override
   State<ImportedPage> createState() => _ImportedPageState();
@@ -170,22 +176,8 @@ class _ImportedPageState extends State<ImportedPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(L.t('imported')),
-        actions: [
-          IconButton(
-            tooltip: L.t('openFolder'),
-            icon: const Icon(Icons.folder_open_rounded),
-            onPressed: () async {
-              final d = await _dir();
-              if (!mounted) return;
-              await FavoritesBackup.openFolder(d.path);
-            },
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
+
+    final body = RefreshIndicator(
         onRefresh: _scan,
         edgeOffset: MediaQuery.of(context).padding.top,
         child: _loading
@@ -276,19 +268,58 @@ class _ImportedPageState extends State<ImportedPage> {
                       );
                     },
                   ),
+      );
+
+    // 顶部工具条：打开文件夹 / 导入文件
+    final toolbar = Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        IconButton(
+          tooltip: L.t('openFolder'),
+          icon: const Icon(Icons.folder_open_rounded, size: 20),
+          onPressed: () async {
+            final d = await _dir();
+            if (!mounted) return;
+            await FavoritesBackup.openFolder(d.path);
+          },
+        ),
+        TextButton.icon(
+          onPressed: _importing ? null : _importFromPicker,
+          icon: _importing
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.file_open_rounded, size: 18),
+          label: Text(
+            L.t('importFile'),
+            style: const TextStyle(fontSize: 12.5),
+          ),
+        ),
+        const SizedBox(width: 4),
+      ],
+    );
+
+    // 嵌入模式：不套 Scaffold，工具条放页面顶部
+    if (widget.embedded) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+            child: toolbar,
+          ),
+          Expanded(child: body),
+        ],
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(L.t('imported')),
+        actions: [toolbar],
       ),
-      // 底部「导入文件」按钮
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _importing ? null : _importFromPicker,
-        icon: _importing
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.file_open_rounded),
-        label: Text(L.t('importFile')),
-      ),
+      body: body,
     );
   }
 

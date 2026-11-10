@@ -148,4 +148,47 @@ class SubscriptionStore extends ChangeNotifier {
       jsonEncode(_items.map((e) => e.toJson()).toList()),
     );
   }
+
+  // ---------------- 关注作者的作品更新基线 ----------------
+
+  static const _kAuthorBase = 'authorBaselines';
+
+  /// 作品 key（`author:<comicId>`）→ (章节数, 最后一章 id)
+  final Map<String, (int, String)> _authorBase = {};
+
+  /// 读某个作品的更新基线；没有记录返回 null（= 首次见到）。
+  (int, String)? authorBaseline(String key) => _authorBase[key];
+
+  /// 记录/更新某个作品的更新基线。
+  Future<void> setAuthorBaseline(
+    String key, {
+    required int chapterCount,
+    required String lastChapterId,
+  }) async {
+    _authorBase[key] = (chapterCount, lastChapterId);
+    await _prefs?.setString(
+      _kAuthorBase,
+      jsonEncode(_authorBase.map(
+        (k, v) => MapEntry(k, [v.$1, v.$2]),
+      )),
+    );
+  }
+
+  /// 启动时加载作者基线。
+  void loadAuthorBaselines() {
+    final raw = _prefs?.getString(_kAuthorBase);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final m = jsonDecode(raw) as Map;
+      _authorBase.clear();
+      m.forEach((k, v) {
+        if (v is List && v.length >= 2) {
+          _authorBase['$k'] = (
+            v[0] is num ? (v[0] as num).toInt() : 0,
+            '${v[1]}',
+          );
+        }
+      });
+    } catch (_) {}
+  }
 }

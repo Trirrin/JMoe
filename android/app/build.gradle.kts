@@ -29,7 +29,14 @@ android {
 
     buildTypes {
         release {
-            // 使用 Flutter 默认的 debug 签名，便于直接侧载安装。
+            // 使用 debug 签名。
+            //
+            // 这样 `flutter build apk --release` 出来的包可以直接侧载安装，
+            // 不需要用户另行配置 keystore。参考 Kazumi 的做法。
+            //
+            // 注意：如果将来要上架应用市场或做覆盖升级，
+            // 必须换成正式签名（keystore），否则不同机器的 debug 签名
+            // 不一致会导致无法覆盖安装。
             signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             isShrinkResources = false

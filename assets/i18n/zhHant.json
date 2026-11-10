@@ -1,7 +1,7 @@
 {
   "about": "關於",
-  "aboutAuthor": "作者：Liuyue_awa",
-  "aboutDesc": "基於 JMComic3 協議重寫的第三方客戶端，支援 JM 與 E-Hentai 雙源。僅供學習研究。",
+  "aboutAuthor": "作者",
+  "aboutDesc": "基於 JMComic3 協議重寫的第三方客戶端，支援漫畫、小說與影片瀏覽，提供線上閱讀、整章下載、離線觀看與閱讀統計。僅供技術學習與研究使用。",
   "aboutLicense": "開源協議：MIT",
   "aboutVersion": "JMoe {v} · 協議 {p}",
   "accountManage": "帳號管理",
@@ -574,13 +574,13 @@
   "invertSelection": "反選",
   "selectedOfN": "已選 {n} / {t}",
   "downloadsDone": "已完成",
-  "downloadsRunning": "下載中",
+  "downloadsRunning": "未完成",
   "downloadsPaused": "暫停中",
   "clearCacheHint": "只清理圖片與暫存檔案，收藏、歷史、閱讀進度都會保留",
   "clearChapterHint": "只清理這一章，其他章節與收藏不受影響",
   "downloadsAll": "全部",
   "downloadsTapHint": "點任意章節即可離線閱讀；長按或點 ⋮ 可開啟目錄、分享、查看解壓密碼",
-  "downloadsRunningEmpty": "暫無下載任務",
+  "downloadsRunningEmpty": "暫無未完成項",
   "downloadsPausedEmpty": "暫無暫停的任務",
   "downloadsDoneEmpty": "暫無已完成的任務",
   "clearTasks": "清除任務",
@@ -711,5 +711,6 @@
   "bookmarkNoteHint": "寫點什麼…（可留空）",
   "bookmarkPageN": "第 {n} 頁",
   "sortRecentlyUpdated": "最近更新",
-  "sortByFavTime": "按收藏時間"
+  "sortByFavTime": "按收藏時間",
+  "downloadsTab": "下載"
 }

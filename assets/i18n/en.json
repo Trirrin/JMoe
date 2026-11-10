@@ -1,7 +1,7 @@
 {
   "about": "About",
-  "aboutAuthor": "Author: Liuyue_awa",
-  "aboutDesc": "A third-party client rewritten on the JMComic3 protocol, supporting JM and E-Hentai sources. For study and research only.",
+  "aboutAuthor": "Author",
+  "aboutDesc": "A third-party client built on the JMComic3 protocol, supporting comics, novels and videos with online reading, whole-chapter downloads, offline viewing and reading statistics. For technical study and research only.",
   "aboutLicense": "License: MIT",
   "aboutVersion": "JMoe {v} · Protocol {p}",
   "accountManage": "Account",
@@ -574,13 +574,13 @@
   "invertSelection": "Invert",
   "selectedOfN": "{n} of {t} selected",
   "downloadsDone": "Completed",
-  "downloadsRunning": "Downloading",
+  "downloadsRunning": "Unfinished",
   "downloadsPaused": "Paused",
   "clearCacheHint": "Clears images and temp files only — favorites, history and progress are kept",
   "clearChapterHint": "Clears this chapter only — other chapters and favorites are untouched",
   "downloadsAll": "All",
   "downloadsTapHint": "Tap any chapter to read offline; long-press or tap ⋮ to open the folder, share, or view the archive password",
-  "downloadsRunningEmpty": "No active downloads",
+  "downloadsRunningEmpty": "Nothing unfinished",
   "downloadsPausedEmpty": "Nothing paused",
   "downloadsDoneEmpty": "Nothing downloaded yet",
   "clearTasks": "Clear tasks",
@@ -711,5 +711,6 @@
   "bookmarkNoteHint": "Write something… (optional)",
   "bookmarkPageN": "p.{n}",
   "sortRecentlyUpdated": "Recently updated",
-  "sortByFavTime": "By date added"
+  "sortByFavTime": "By date added",
+  "downloadsTab": "Downloads"
 }

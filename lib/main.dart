@@ -6,7 +6,6 @@ import 'core/host_store.dart';
 import 'core/subscription_checker.dart';
 import 'core/subscription_store.dart';
 import 'widgets/clipboard_link_watcher.dart';
-import 'widgets/global_nav_bar.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 
@@ -110,6 +109,8 @@ void main() async {
       };
   await ReadingStats.instance.load();
   await SubscriptionStore.instance.load();
+  // 关注作者的作品更新基线（用于「订阅该作者全部更新」）
+  SubscriptionStore.instance.loadAuthorBaselines();
   await CollectStore.instance.load();
   await HostStore.instance.load();
   // 订阅更新检查（每 6 小时一次，发现新章发系统通知）
@@ -194,21 +195,8 @@ class _JmoeAppState extends State<JmoeApp> {
             systemNavigationBarIconBrightness:
                 isDark ? Brightness.light : Brightness.dark,
           ),
-          // 剪贴板链接探测：包在 Navigator 之外、MaterialApp 之内，
-          // 这样**任何页面**上都能弹出询问面板（用户要求「无论当前
-          // 属于什么页面」）。它本身不渲染任何东西，只监听生命周期。
-          //
-          // 底部导航栏也画在这一层：它在 Navigator 之外，所以层级
-          // **高于 Hero 飞行层** → 封面飞过时会被导航栏挡住
-          // （用户要求「导航栏不动，但遮挡封面 hero」）。
-          child: Stack(
-            children: [
-              ClipboardLinkWatcher(
-                child: child ?? const SizedBox.shrink(),
-              ),
-              // 导航栏浮在最上层
-              const GlobalNavBar(),
-            ],
+          child: ClipboardLinkWatcher(
+            child: child ?? const SizedBox.shrink(),
           ),
         );
       },

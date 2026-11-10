@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../core/app_state.dart';
 import '../core/app_theme.dart';
+import '../core/jm_protocol.dart';
 import '../core/jm_service.dart';
 import '../core/l10n.dart';
 import '../widgets/common_widgets.dart';
@@ -269,9 +270,14 @@ class _CommentPageState extends State<CommentPage> {
     // 加载它只会得到一张灰图，不如直接回落到人形图标。
     if (photo.startsWith('nopic')) return null;
     if (photo.startsWith('http')) return photo;
-    // 官方路径形如 https://{host}/media/user/{photo}
-    final host = JmService.instance.imgHost ?? '';
-    return '$host/media/user/$photo';
+    // 官方路径形如 https://{主站域名}/media/user/{photo}
+    //
+    // **必须用主站域名，不能用图片 CDN（imgHost）**。
+    // 实测：cdn-msp*.jmapiproxy*.cc 等图片 CDN 对 /media/user/ 路径
+    // 一律返回 0 字节，只有 www.cdnbtd.cc 这类主站才返回真实图片。
+    // 之前用 imgHost 拼 → 头像永远是空的，这就是"头像显示不出来"的原因。
+    final base = JmApi.instance.baseUrl; // 形如 https://host/
+    return '${base}media/user/$photo';
   }
 
   @override

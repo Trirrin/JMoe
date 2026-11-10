@@ -19,7 +19,7 @@ import 'anime_player_page.dart';
 import 'novel_pages.dart';
 import 'unified_detail_page.dart';
 import 'login_page.dart';
-import 'downloads_page.dart';
+import 'downloads_hub_page.dart';
 import 'bookmarks_page.dart';
 import 'collect_page.dart';
 import 'imported_page.dart';
@@ -1180,17 +1180,10 @@ class _LibraryPageState extends State<LibraryPage>
         icon: Icons.download_outlined,
         label: L.t('myDownloads'),
         color: const Color(0xFF009688),
+        // 下载与导入合并到同一页面（两个 Tab）：
+        // 都是「本地内容」，拆成两个入口用户要来回切
         onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const DownloadsPage()),
-        ),
-      ),
-      // 「我导入」：管理外部导入的 .jmoe 加密包
-      _Entry(
-        icon: Icons.inbox_rounded,
-        label: L.t('imported'),
-        color: const Color(0xFF7E57C2),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const ImportedPage()),
+          MaterialPageRoute(builder: (_) => const DownloadsHubPage()),
         ),
       ),
       // 书签：标记「这一话很精彩」的章节总览
@@ -1205,7 +1198,7 @@ class _LibraryPageState extends State<LibraryPage>
       // 关注与专辑：关注作者/标签、按作者聚合作品
       _Entry(
         icon: Icons.person_add_alt_1_rounded,
-        label: L.t('followAndAlbums'),
+        label: L.t('following'),
         color: const Color(0xFF26A69A),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const CollectPage()),

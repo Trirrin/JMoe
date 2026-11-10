@@ -1,0 +1,13 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "JMoe main module" },
+    { "name": "EntryAbility_desc", "value": "JMoe comic client" },
+    { "name": "EntryAbility_label", "value": "JMoe" },
+    { "name": "permission_internet_reason", "value": "Load comics, novels and videos" },
+    { "name": "permission_network_reason", "value": "Detect network to pick the fastest host" },
+    { "name": "permission_background_reason", "value": "Keep downloading in background" },
+    { "name": "permission_notify_reason", "value": "Notify when followed works update" },
+    { "name": "permission_media_reason", "value": "Read locally saved comic files" },
+    { "name": "permission_media_write_reason", "value": "Save downloaded comics to device" }
+  ]
+}

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../core/app_theme.dart';
 import '../core/collect_store.dart';
 import '../core/jm_service.dart';
 import '../core/l10n.dart';
@@ -23,11 +22,7 @@ class CollectPage extends StatefulWidget {
   State<CollectPage> createState() => _CollectPageState();
 }
 
-class _CollectPageState extends State<CollectPage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tab =
-      TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
-
+class _CollectPageState extends State<CollectPage> {
   @override
   void initState() {
     super.initState();
@@ -37,7 +32,6 @@ class _CollectPageState extends State<CollectPage>
   @override
   void dispose() {
     CollectStore.instance.removeListener(_onChanged);
-    _tab.dispose();
     super.dispose();
   }
 
@@ -47,24 +41,13 @@ class _CollectPageState extends State<CollectPage>
 
   @override
   Widget build(BuildContext context) {
+    // 只保留「关注」：专辑功能已删除（用户要求）。
+    // 关注作者时会自动订阅该作者的全部更新，不再需要手工建合集。
     return Scaffold(
       appBar: AppBar(
-        title: Text(L.t('followAndAlbums')),
-        bottom: TabBar(
-          controller: _tab,
-          tabs: [
-            Tab(text: L.t('following')),
-            Tab(text: L.t('albums')),
-          ],
-        ),
+        title: Text(L.t('following')),
       ),
-      body: TabBarView(
-        controller: _tab,
-        children: const [
-          _FollowingTab(),
-          _AlbumsTab(),
-        ],
-      ),
+      body: const _FollowingTab(),
     );
   }
 }
@@ -162,219 +145,6 @@ class _FollowingTab extends StatelessWidget {
         ),
         const SizedBox(height: 30),
       ],
-    );
-  }
-}
-
-/// 专辑列表。
-class _AlbumsTab extends StatelessWidget {
-  const _AlbumsTab();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final albums = CollectStore.instance.albums;
-
-    return Scaffold(
-      body: albums.isEmpty
-          ? EmptyView(
-              message: L.t('albumsEmpty'),
-              icon: Icons.collections_bookmark_outlined,
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(AppStyle.pagePadding),
-              itemCount: albums.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 8),
-              itemBuilder: (context, i) {
-                final a = albums[i];
-                return Material(
-                  color: scheme.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(12),
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.collections_bookmark_rounded,
-                      color: scheme.primary,
-                    ),
-                    title: Text(
-                      a.name,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    subtitle: Text(
-                      a.keywords.isEmpty
-                          ? L.t('albumNoKeywords')
-                          : a.keywords.join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11),
-                    ),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => _AlbumEditPage(album: a),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final a = await Navigator.of(context).push<Album>(
-            MaterialPageRoute(builder: (_) => const _AlbumEditPage()),
-          );
-          if (a != null) {
-            await CollectStore.instance.createAlbum(
-              name: a.name,
-              keywords: a.keywords,
-            );
-          }
-        },
-        icon: const Icon(Icons.add_rounded),
-        label: Text(L.t('newAlbum')),
-      ),
-    );
-  }
-}
-
-/// 新建 / 编辑专辑：名称 + 多个关键词。
-class _AlbumEditPage extends StatefulWidget {
-  const _AlbumEditPage({this.album});
-
-  final Album? album;
-
-  @override
-  State<_AlbumEditPage> createState() => _AlbumEditPageState();
-}
-
-class _AlbumEditPageState extends State<_AlbumEditPage> {
-  late final TextEditingController _name =
-      TextEditingController(text: widget.album?.name ?? '');
-  late final List<String> _keywords =
-      List<String>.from(widget.album?.keywords ?? const []);
-  final _kwCtrl = TextEditingController();
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _kwCtrl.dispose();
-    super.dispose();
-  }
-
-  void _addKeyword() {
-    final v = _kwCtrl.text.trim();
-    if (v.isEmpty) return;
-    if (_keywords.contains(v)) {
-      _kwCtrl.clear();
-      return;
-    }
-    setState(() => _keywords.add(v));
-    _kwCtrl.clear();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final isNew = widget.album == null;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(isNew ? L.t('newAlbum') : L.t('editAlbum')),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              final name = _name.text.trim();
-              if (name.isEmpty) return;
-              if (isNew) {
-                Navigator.pop(
-                  context,
-                  Album(
-                    id: '',
-                    name: name,
-                    keywords: _keywords,
-                    at: 0,
-                  ),
-                );
-              } else {
-                await CollectStore.instance.updateAlbum(
-                  widget.album!.copyWith(
-                    name: name,
-                    keywords: _keywords,
-                  ),
-                );
-                if (context.mounted) Navigator.pop(context);
-              }
-            },
-            child: Text(L.t('save')),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          TextField(
-            controller: _name,
-            decoration: InputDecoration(
-              labelText: L.t('albumName'),
-              border: const OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            L.t('albumKeywords'),
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            L.t('albumKeywordsHint'),
-            style: TextStyle(
-              fontSize: 11,
-              height: 1.5,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _kwCtrl,
-                  onSubmitted: (_) => _addKeyword(),
-                  decoration: InputDecoration(
-                    hintText: L.t('albumKeywordHint'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _addKeyword,
-                child: Text(L.t('add')),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final k in _keywords)
-                Chip(
-                  label: Text(k, style: const TextStyle(fontSize: 12)),
-                  onDeleted: () => setState(() => _keywords.remove(k)),
-                ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

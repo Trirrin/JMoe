@@ -13,6 +13,7 @@ import '../core/image_scrambler.dart';
 import '../core/source.dart';
 import '../core/models.dart';
 import '../core/jm_source.dart';
+import 'zip_packer.dart';
 import 'l10n.dart';
 
 /// 批量下载整章：并发抓取 + 还原 + 写入相册目录，带进度与取消。
@@ -215,6 +216,18 @@ class ChapterDownloader {
     final path = t?.savedPath;
     if (path == null) return null;
     try {
+      // 已打包成 zip / .jmoe 单文件 → 返回包路径，files 为空。
+      // 阅读时由阅读器从包内按页读取（见 ZipReader）。
+      final lower = path.toLowerCase();
+      if (lower.endsWith('.zip') || lower.endsWith('.jmoe')) {
+        final f = File(path);
+        if (!await f.exists()) return null;
+        return (
+          dir: path,
+          chapterName: t!.chapterName,
+          files: const <String>[],
+        );
+      }
       final d = Directory(path);
       if (!await d.exists()) return null;
       final files = <String>[];
@@ -239,6 +252,12 @@ class ChapterDownloader {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 某个下载任务是否已经打包成 `.jmoe` 单文件。
+  static bool isPacked(String sourceId, String chapterId) {
+    final p = _tasks['$sourceId:$chapterId']?.savedPath;
+    return p != null && p.toLowerCase().endsWith('.jmoe');
   }
 
   /// 按数据源 + 章节 id 删除（与 _tasks 的 key 格式一致）。
@@ -426,6 +445,16 @@ class ChapterDownloader {
         // 封面现在存在**作品级目录**（所有选集共用一张）
         final cf = File('${albumDir.path}/cover.jpg');
         if (cf.existsSync()) task.coverPath = cf.path;
+
+        // **下载完成后自动打包成 .jmoe 单文件**（用户要求：
+        // 「下载后应该是个压缩包，而不是一个目录」）。
+        //
+        // 下载过程仍用目录，因为逐页写入 + 断点续传需要散文件；
+        // 全部页就绪后再收拢成一个包并删掉目录 —— 用户看到的就是
+        // 一个 .jmoe 文件，而不是一堆散图。
+        if (task.done) {
+          await packCompleted(task, dir, albumDir);
+        }
       } catch (e) {
         task.error = '$e';
         task.done = true;
@@ -435,24 +464,49 @@ class ChapterDownloader {
     return task;
   }
 
+  /// 把已完成的下载目录打包成 **无加密 zip**，然后删除目录。
+  ///
+  /// 用户要求：「在本地存储用 zip 无加密压缩包，分享用 .jmoe」。
+  ///
+  ///  * 下载过程仍用目录（逐页写入 + 断点续传需要散文件）
+  ///  * 全部页就绪后收拢成一个 zip，删掉目录 → 用户看到的是一个
+  ///    标准压缩包，可以用任何解压工具打开取出图片
+  ///  * 点「分享」时才另外生成 `.jmoe`（加密 + 带元数据）
+  ///
+  /// 打包在后台 isolate 执行，不卡 UI。
+  static Future<void> packCompleted(
+    DownloadTask task,
+    Directory chapterDir,
+    Directory albumDir,
+  ) async {
+    try {
+      final name = _sanitize(
+        task.chapterName.isEmpty ? task.albumName : task.chapterName,
+      );
+      if (name.isEmpty) return;
+      final outPath = '${albumDir.path}/$name.zip';
+
+      final packed = await ZipPacker.instance.pack(
+        dirPath: chapterDir.path,
+        outPath: outPath,
+      );
+      if (packed == null) return;
+
+      // 打包成功 → 删掉散图目录，并把路径换成 zip
+      try {
+        if (chapterDir.existsSync()) chapterDir.deleteSync(recursive: true);
+      } catch (_) {}
+      task.savedPath = packed.path;
+      task.packedPath = packed.path;
+    } catch (_) {
+      // 打包失败就保留目录（内容仍然可读，只是没合成单文件）
+    }
+  }
+
   static String _sanitize(String s) =>
       s.replaceAll(RegExp(r'[\\/:*?"<>|\n\r\t]'), '_').trim();
 
   // ---------------- 离线文件的外围操作 ----------------
-
-  /// 下载内容压缩包的固定密码。
-  ///
-  /// 为什么用固定密码而不是每章随机：
-  ///  * 用户要在文件管理器里解压时得先知道密码，固定值可以背下来；
-  ///  * 每章随机意味着用户每解一个包都要来这里复制一次，体验很差。
-  /// 安全性不是重点（本地已加密落盘），这里的目标只是「不让别人随手打开」。
-  static const String archivePassword = 'jmoe';
-
-  /// 复制压缩包密码到剪贴板。
-  static Future<void> copyPassword() async {
-    await Clipboard.setData(const ClipboardData(text: archivePassword));
-    HapticFeedback.lightImpact();
-  }
 
   /// 用系统文件管理器打开某章目录。
   static Future<bool> openFolder(String dirPath) async {
@@ -592,6 +646,12 @@ class DownloadTask {
   bool paused = false;
   String? error;
   String? savedPath;
+
+  /// 打包后的 `.jmoe` 文件路径（下载完成后自动生成）。
+  ///
+  /// 非空表示这一章已经收拢成单文件、散图目录已删除。
+  /// 阅读时由 `localPages` 从这个包直接读。
+  String? packedPath;
 
   /// 展示用元信息
   String albumName = '';

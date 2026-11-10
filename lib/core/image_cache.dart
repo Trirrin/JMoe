@@ -401,6 +401,37 @@ class ImageCacheManager {
     }
   }
 
+  /// 按**目标宽度**解码（等比缩放）。
+  ///
+  /// 漫画页常见 800×5000 这类超长图，全尺寸解码后光位图就几十 MB，
+  /// 而 `instantiateImageCodec` 是在主 isolate 上同步解码的 ——
+  /// 滚动时每换一页就卡一下，正是这个原因。
+  ///
+  /// 实际显示宽度只有屏幕宽（约 400~600 物理像素），
+  /// 把解码宽度限制到屏幕宽度（乘一点余量保证清晰）能把解码开销
+  /// 和内存降到原来的几分之一，滚动明显更顺。
+  ///
+  /// [targetWidth] 为 null 或非正数时不缩放（保持原行为）。
+  static Future<ui.Image?> decodeScaled(
+    Uint8List bytes, {
+    int? targetWidth,
+  }) async {
+    if (targetWidth == null || targetWidth <= 0) {
+      return decode(bytes);
+    }
+    try {
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: targetWidth,
+      );
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } catch (_) {
+      // 缩放失败退回原尺寸，保证能显示
+      return decode(bytes);
+    }
+  }
+
   /// 整章预缓存：并发抓取 + 还原 + 解码进内存，读时零等待。
   ///
   /// [items] 每项为 (缓存键, 直接地址, 需解析的页面地址)。
