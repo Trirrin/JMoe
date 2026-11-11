@@ -57,30 +57,6 @@
           "abilities": ["EntryAbility"],
           "when": "always"
         }
-      },
-      {
-        "name": "ohos.permission.NOTIFICATION_CONTROLLER",
-        "reason": "$string:permission_notify_reason",
-        "usedScene": {
-          "abilities": ["EntryAbility"],
-          "when": "always"
-        }
-      },
-      {
-        "name": "ohos.permission.READ_MEDIA",
-        "reason": "$string:permission_media_reason",
-        "usedScene": {
-          "abilities": ["EntryAbility"],
-          "when": "inuse"
-        }
-      },
-      {
-        "name": "ohos.permission.WRITE_MEDIA",
-        "reason": "$string:permission_media_write_reason",
-        "usedScene": {
-          "abilities": ["EntryAbility"],
-          "when": "inuse"
-        }
       }
     ]
   }
